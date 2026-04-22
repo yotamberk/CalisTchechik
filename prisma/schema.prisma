@@ -1,0 +1,248 @@
+// This is your Prisma schema file.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TRAINER
+  TRAINEE
+}
+
+enum VolumeType {
+  NUMBER
+  MAX
+  HEIGHT_CM
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles UserRole[]
+
+  // Trainer relationships
+  traineesAsTrainer TrainerTrainee[] @relation("TrainerRelation")
+  trainerAsTrainee  TrainerTrainee[] @relation("TraineeRelation")
+
+  exercises Exercise[]
+
+  plansAsTrainer Plan[] @relation("PlanTrainer")
+  plansAsTrainee Plan[] @relation("PlanTrainee")
+
+  sessionLogs     SessionLog[]
+  trainerFeedback TrainerFeedback[]
+}
+
+model UserRole {
+  id     String @id @default(cuid())
+  userId String
+  role   Role
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+}
+
+model TrainerTrainee {
+  id        String   @id @default(cuid())
+  trainerId String
+  traineeId String
+  createdAt DateTime @default(now())
+
+  trainer User @relation("TrainerRelation", fields: [trainerId], references: [id], onDelete: Cascade)
+  trainee User @relation("TraineeRelation", fields: [traineeId], references: [id], onDelete: Cascade)
+
+  @@unique([trainerId, traineeId])
+}
+
+model Exercise {
+  id        String   @id @default(cuid())
+  trainerId String
+  name      String
+  videoUrl  String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trainer  User              @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  variants ExerciseVariant[]
+  rows     ExerciseRow[]
+
+  @@index([trainerId])
+}
+
+model ExerciseVariant {
+  id             String   @id @default(cuid())
+  exerciseId     String
+  name           String
+  videoUrl       String?
+  difficultyOrder Int     @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  exercise Exercise      @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  rows     ExerciseRow[]
+
+  @@index([exerciseId])
+}
+
+model Plan {
+  id        String   @id @default(cuid())
+  trainerId String
+  traineeId String
+  name      String
+  startDate DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trainer User   @relation("PlanTrainer", fields: [trainerId], references: [id], onDelete: Cascade)
+  trainee User   @relation("PlanTrainee", fields: [traineeId], references: [id], onDelete: Cascade)
+  weeks   Week[]
+
+  @@index([trainerId])
+  @@index([traineeId])
+}
+
+model Week {
+  id          String   @id @default(cuid())
+  planId      String
+  weekNumber  Int
+  startDate   DateTime
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plan     Plan              @relation(fields: [planId], references: [id], onDelete: Cascade)
+  sessions Session[]
+  feedback TrainerFeedback[] @relation("WeekFeedback")
+
+  @@unique([planId, weekNumber])
+  @@index([planId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  weekId    String
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  week     Week         @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  sections Section[]
+  logs     SessionLog[]
+
+  @@index([weekId])
+}
+
+model Section {
+  id        String   @id @default(cuid())
+  sessionId String
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session Session       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  rows    ExerciseRow[]
+
+  @@index([sessionId])
+}
+
+model ExerciseRow {
+  id           String     @id @default(cuid())
+  sectionId    String
+  order        Int        @default(0)
+  groupKey     String?
+  exerciseId   String
+  variantId    String?
+  restMinutes  Float      @default(2)
+  volumeType   VolumeType @default(NUMBER)
+  volumeValue  String     @default("10")
+  breakMinutes Float      @default(1)
+  sets         Int        @default(3)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  section  Section          @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  exercise Exercise         @relation(fields: [exerciseId], references: [id])
+  variant  ExerciseVariant? @relation(fields: [variantId], references: [id])
+  rowLogs  RowLog[]
+  feedback TrainerFeedback[] @relation("RowFeedback")
+
+  @@index([sectionId])
+}
+
+model SessionLog {
+  id          String    @id @default(cuid())
+  sessionId   String
+  traineeId   String
+  performedOn DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  session Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  trainee User     @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  rowLogs RowLog[]
+
+  @@unique([sessionId, traineeId])
+  @@index([sessionId])
+  @@index([traineeId])
+}
+
+model RowLog {
+  id           String   @id @default(cuid())
+  sessionLogId String
+  rowId        String
+  rpe          Int?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessionLog SessionLog  @relation(fields: [sessionLogId], references: [id], onDelete: Cascade)
+  row        ExerciseRow @relation(fields: [rowId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionLogId, rowId])
+  @@index([sessionLogId])
+}
+
+model TrainerFeedback {
+  id        String   @id @default(cuid())
+  authorId  String
+  weekId    String?
+  rowId     String?
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  week   Week?        @relation("WeekFeedback", fields: [weekId], references: [id], onDelete: Cascade)
+  row    ExerciseRow? @relation("RowFeedback", fields: [rowId], references: [id], onDelete: Cascade)
+
+  @@index([weekId])
+  @@index([rowId])
+}
+
+model PendingAccessRequest {
+  id          String    @id @default(cuid())
+  email       String
+  name        String?
+  avatar      String?
+  attemptedAt DateTime  @default(now())
+  notifiedAt  DateTime?
+
+  @@index([email])
+}
