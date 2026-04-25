@@ -20,6 +20,8 @@ enum VolumeType {
   NUMBER
   MAX
   HEIGHT_CM
+  TIME_SEC
+  MAX_HOLD
 }
 
 model User {

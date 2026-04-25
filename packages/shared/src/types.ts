@@ -1,5 +1,5 @@
 export type Role = 'ADMIN' | 'TRAINER' | 'TRAINEE';
-export type VolumeType = 'NUMBER' | 'MAX' | 'HEIGHT_CM';
+export type VolumeType = 'NUMBER' | 'MAX' | 'HEIGHT_CM' | 'TIME_SEC' | 'MAX_HOLD';
 
 export interface UserDto {
   id: string;

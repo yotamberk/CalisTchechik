@@ -61,7 +61,7 @@ export const CreateSectionSchema = z.object({
   order: z.number().int().default(0),
 });
 
-export const VolumeTypeEnum = z.enum(['NUMBER', 'MAX', 'HEIGHT_CM']);
+export const VolumeTypeEnum = z.enum(['NUMBER', 'MAX', 'HEIGHT_CM', 'TIME_SEC', 'MAX_HOLD']);
 
 export const CreateExerciseRowSchema = z.object({
   sectionId: z.string(),

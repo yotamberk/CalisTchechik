@@ -15,6 +15,10 @@ export function formatVolumeLabel(volumeType: string, volumeValue: string): stri
   switch (volumeType) {
     case 'MAX':
       return 'MAX reps';
+    case 'MAX_HOLD':
+      return 'Max Hold';
+    case 'TIME_SEC':
+      return `${volumeValue}"`;
     case 'HEIGHT_CM':
       return `${volumeValue} cm`;
     default:

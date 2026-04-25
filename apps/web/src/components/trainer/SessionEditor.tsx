@@ -1,48 +1,132 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Plus, Trash2, GripVertical, ExternalLink, MessageSquare } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { api } from '@/lib/api';
 import type { SessionDto, SectionDto, ExerciseDto, ExerciseRowDto } from '@calist/shared';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { cn } from '@/lib/utils';
 
-interface SessionEditorProps {
-  session: SessionDto;
-  exercises: ExerciseDto[];
-  planId: string;
-  onRefresh: () => void;
-}
+// ---------------------------------------------------------------------------
+// Volume type options
+// ---------------------------------------------------------------------------
 
 const VOLUME_TYPES = [
   { value: 'NUMBER', label: '# Reps' },
-  { value: 'MAX', label: 'MAX reps' },
+  { value: 'MAX', label: 'Max Reps' },
+  { value: 'TIME_SEC', label: 'Time (sec)' },
+  { value: 'MAX_HOLD', label: 'Max Hold' },
   { value: 'HEIGHT_CM', label: 'Height (cm)' },
+] as const;
+
+const NO_VALUE_TYPES = new Set(['MAX', 'MAX_HOLD']);
+
+// ---------------------------------------------------------------------------
+// Group colour strip
+// ---------------------------------------------------------------------------
+
+const GROUP_COLORS = [
+  'border-l-sky-500',
+  'border-l-violet-500',
+  'border-l-amber-500',
+  'border-l-rose-500',
+  'border-l-emerald-500',
+  'border-l-orange-500',
+  'border-l-cyan-500',
+  'border-l-pink-500',
 ];
 
-function getGroupColor(groupKey: string | null | undefined): string {
-  if (!groupKey) return '';
-  const colors = [
-    'border-l-blue-500',
-    'border-l-purple-500',
-    'border-l-yellow-500',
-    'border-l-pink-500',
-    'border-l-orange-500',
-  ];
-  const hash = groupKey.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return colors[hash % colors.length] ?? 'border-l-blue-500';
+function groupColor(key: string | null | undefined): string {
+  if (!key) return 'border-l-transparent';
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) & 0xff;
+  return GROUP_COLORS[h % GROUP_COLORS.length] ?? 'border-l-sky-500';
 }
 
-interface RowEditorProps {
+// ---------------------------------------------------------------------------
+// Next auto group letter
+// ---------------------------------------------------------------------------
+
+function nextGroupLetter(rows: ExerciseRowDto[]): string {
+  const used = new Set(rows.map((r) => r.groupKey?.toUpperCase()).filter(Boolean));
+  for (let i = 0; i < 26; i++) {
+    const letter = String.fromCharCode(65 + i);
+    if (!used.has(letter)) return letter;
+  }
+  return 'A';
+}
+
+// ---------------------------------------------------------------------------
+// Shared column grid style — applied to header AND each row so they align
+// ---------------------------------------------------------------------------
+// Columns: grip | exercise | variant | sets | vol-type | vol-value | rest | group | actions
+const GRID_COLS =
+  'grid grid-cols-[24px_minmax(120px,1.8fr)_minmax(100px,1fr)_52px_120px_56px_72px_48px_auto] gap-x-2 items-center';
+
+// ---------------------------------------------------------------------------
+// Sortable row wrapper
+// ---------------------------------------------------------------------------
+
+interface SortableRowProps {
+  id: string;
   row: ExerciseRowDto;
   exercises: ExerciseDto[];
   onRefresh: () => void;
   onDelete: () => void;
 }
 
-function RowEditor({ row, exercises, onRefresh, onDelete }: RowEditorProps) {
+function SortableRow({ id, row, exercises, onRefresh, onDelete }: SortableRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <RowEditor
+        row={row}
+        exercises={exercises}
+        onRefresh={onRefresh}
+        onDelete={onDelete}
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row editor
+// ---------------------------------------------------------------------------
+
+interface RowEditorProps {
+  row: ExerciseRowDto;
+  exercises: ExerciseDto[];
+  onRefresh: () => void;
+  onDelete: () => void;
+  dragHandleProps?: Record<string, unknown>;
+}
+
+function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: RowEditorProps) {
   const exercise = exercises.find((e) => e.id === row.exerciseId);
   const [feedbackModal, setFeedbackModal] = useState(false);
   const [feedbackContent, setFeedbackContent] = useState('');
@@ -53,138 +137,137 @@ function RowEditor({ row, exercises, onRefresh, onDelete }: RowEditorProps) {
   });
 
   const addFeedback = useMutation({
-    mutationFn: () =>
-      api.post('/feedback', { rowId: row.id, content: feedbackContent }),
-    onSuccess: () => {
-      onRefresh();
-      setFeedbackModal(false);
-      setFeedbackContent('');
-    },
+    mutationFn: () => api.post('/feedback', { rowId: row.id, content: feedbackContent }),
+    onSuccess: () => { onRefresh(); setFeedbackModal(false); setFeedbackContent(''); },
   });
 
-  const groupColor = getGroupColor(row.groupKey);
+  const noValue = NO_VALUE_TYPES.has(row.volumeType);
 
   return (
     <div
       className={cn(
-        'flex items-center gap-2 py-2 px-2 rounded-lg bg-gray-800/40 border-l-2 border-l-transparent',
-        row.groupKey && `border-l-2 ${groupColor}`,
+        GRID_COLS,
+        'py-1.5 px-1 rounded-lg bg-gray-800/40 border-l-2',
+        groupColor(row.groupKey),
       )}
     >
-      <div className="text-gray-600 cursor-grab flex-shrink-0">
+      {/* Drag handle */}
+      <div
+        className="flex items-center justify-center text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing touch-none"
+        {...dragHandleProps}
+      >
         <GripVertical size={14} />
       </div>
 
-      {/* Exercise select */}
-      <Select
+      {/* Exercise */}
+      <select
         value={row.exerciseId}
         onChange={(e) => updateRow.mutate({ exerciseId: e.target.value, variantId: null })}
-        className="flex-1 min-w-0 text-sm py-1.5"
+        className="input text-xs py-1 truncate"
       >
         {exercises.map((ex) => (
-          <option key={ex.id} value={ex.id}>
-            {ex.name}
-          </option>
+          <option key={ex.id} value={ex.id}>{ex.name}</option>
         ))}
-      </Select>
+      </select>
 
-      {/* Variant select */}
-      {exercise && exercise.variants.length > 0 && (
-        <Select
-          value={row.variantId ?? ''}
-          onChange={(e) => updateRow.mutate({ variantId: e.target.value || null })}
-          className="w-36 text-sm py-1.5"
-        >
-          <option value="">No variant</option>
-          {exercise.variants.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name}
-            </option>
-          ))}
-        </Select>
-      )}
+      {/* Variant */}
+      <select
+        value={row.variantId ?? ''}
+        onChange={(e) => updateRow.mutate({ variantId: e.target.value || null })}
+        className="input text-xs py-1"
+        disabled={!exercise || exercise.variants.length === 0}
+      >
+        <option value="">—</option>
+        {exercise?.variants.map((v) => (
+          <option key={v.id} value={v.id}>{v.name}</option>
+        ))}
+      </select>
 
       {/* Sets */}
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <span className="text-xs text-gray-500">Sets</span>
-        <input
-          type="number"
-          min={1}
-          value={row.sets}
-          onChange={(e) => updateRow.mutate({ sets: parseInt(e.target.value) || 1 })}
-          className="input w-12 text-sm py-1.5 text-center px-1"
-        />
-      </div>
+      <input
+        type="number"
+        min={1}
+        value={row.sets}
+        onChange={(e) => updateRow.mutate({ sets: parseInt(e.target.value) || 1 })}
+        className="input text-xs py-1 text-center px-1 w-full"
+      />
 
-      {/* Volume */}
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Select
-          value={row.volumeType}
-          onChange={(e) => updateRow.mutate({ volumeType: e.target.value as 'NUMBER' | 'MAX' | 'HEIGHT_CM' })}
-          className="w-28 text-sm py-1.5"
-        >
-          {VOLUME_TYPES.map((vt) => (
-            <option key={vt.value} value={vt.value}>
-              {vt.label}
-            </option>
-          ))}
-        </Select>
-        {row.volumeType !== 'MAX' && (
-          <input
-            type="text"
-            value={row.volumeValue}
-            onChange={(e) => updateRow.mutate({ volumeValue: e.target.value })}
-            className="input w-14 text-sm py-1.5 text-center px-1"
-            placeholder="10"
-          />
-        )}
-      </div>
+      {/* Volume type */}
+      <select
+        value={row.volumeType}
+        onChange={(e) =>
+          updateRow.mutate({
+            volumeType: e.target.value as ExerciseRowDto['volumeType'],
+            volumeValue: NO_VALUE_TYPES.has(e.target.value) ? '' : row.volumeValue,
+          })
+        }
+        className="input text-xs py-1"
+      >
+        {VOLUME_TYPES.map((vt) => (
+          <option key={vt.value} value={vt.value}>{vt.label}</option>
+        ))}
+      </select>
+
+      {/* Volume value */}
+      <input
+        type="text"
+        value={row.volumeValue}
+        onChange={(e) => updateRow.mutate({ volumeValue: e.target.value })}
+        className="input text-xs py-1 text-center px-1 w-full"
+        placeholder={noValue ? '—' : '10'}
+        disabled={noValue}
+      />
 
       {/* Rest */}
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <span className="text-xs text-gray-500">Rest</span>
+      <div className="flex items-center gap-0.5">
         <input
           type="number"
           min={0}
           step={0.5}
           value={row.restMinutes}
-          onChange={(e) => updateRow.mutate({ restMinutes: parseFloat(e.target.value) })}
-          className="input w-14 text-sm py-1.5 text-center px-1"
+          onChange={(e) => updateRow.mutate({ restMinutes: parseFloat(e.target.value) || 0 })}
+          className="input text-xs py-1 text-center px-1 w-full"
         />
-        <span className="text-xs text-gray-500">min</span>
+        <span className="text-xs text-gray-600 flex-shrink-0">'</span>
       </div>
 
       {/* Group key */}
       <input
         type="text"
         value={row.groupKey ?? ''}
-        onChange={(e) => updateRow.mutate({ groupKey: e.target.value || null })}
-        className="input w-16 text-sm py-1.5 text-center px-1"
-        placeholder="grp"
-        title="Group key (same key = superset)"
+        onChange={(e) => updateRow.mutate({ groupKey: e.target.value.toUpperCase() || null })}
+        maxLength={2}
+        className="input text-xs py-1 text-center px-1 w-full font-mono"
+        placeholder="—"
       />
 
-      {/* Feedback & video */}
-      <div className="flex gap-1 flex-shrink-0">
+      {/* Actions */}
+      <div className="flex items-center gap-0.5 justify-end">
         {(exercise?.videoUrl || row.variant?.videoUrl) && (
           <a
             href={row.variant?.videoUrl ?? exercise?.videoUrl ?? '#'}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-ghost p-1.5 text-xs"
+            className="p-1 text-gray-500 hover:text-brand-400 rounded transition-colors"
           >
             <ExternalLink size={12} />
           </a>
         )}
-        <Button size="icon" variant="ghost" onClick={() => setFeedbackModal(true)}>
+        <button
+          onClick={() => setFeedbackModal(true)}
+          className="p-1 text-gray-500 hover:text-blue-400 rounded transition-colors"
+        >
           <MessageSquare size={12} />
-        </Button>
-        <Button size="icon" variant="danger" onClick={onDelete}>
+        </button>
+        <button
+          onClick={onDelete}
+          className="p-1 text-gray-600 hover:text-red-400 rounded transition-colors"
+        >
           <Trash2 size={12} />
-        </Button>
+        </button>
       </div>
 
-      {/* Row feedback modal */}
+      {/* Feedback modal */}
       <Modal
         open={feedbackModal}
         onClose={() => setFeedbackModal(false)}
@@ -201,11 +284,7 @@ function RowEditor({ row, exercises, onRefresh, onDelete }: RowEditorProps) {
           />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setFeedbackModal(false)}>Cancel</Button>
-            <Button
-              variant="primary"
-              loading={addFeedback.isPending}
-              onClick={() => addFeedback.mutate()}
-            >
+            <Button variant="primary" loading={addFeedback.isPending} onClick={() => addFeedback.mutate()}>
               Save
             </Button>
           </div>
@@ -213,6 +292,133 @@ function RowEditor({ row, exercises, onRefresh, onDelete }: RowEditorProps) {
       </Modal>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Section component with DnD
+// ---------------------------------------------------------------------------
+
+interface SectionEditorProps {
+  section: SectionDto;
+  exercises: ExerciseDto[];
+  onRefresh: () => void;
+  onDeleteSection: () => void;
+  onAddRow: (sectionId: string, groupKey: string) => void;
+}
+
+function SectionEditor({ section, exercises, onRefresh, onDeleteSection, onAddRow }: SectionEditorProps) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const reorderRows = useMutation({
+    mutationFn: (orderedIds: string[]) => api.post('/sessions/rows/reorder', { orderedIds }),
+    onSuccess: onRefresh,
+  });
+
+  const deleteRow = useMutation({
+    mutationFn: (id: string) => api.delete(`/sessions/rows/${id}`),
+    onSuccess: onRefresh,
+  });
+
+  // Sort rows: group same groupKeys together, preserve relative order within group
+  const sortedRows = [...(section.rows ?? [])].sort((a, b) => {
+    const gA = a.groupKey ?? `\x00${a.order}`;
+    const gB = b.groupKey ?? `\x00${b.order}`;
+    if (gA !== gB) return gA < gB ? -1 : 1;
+    return a.order - b.order;
+  });
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = sortedRows.findIndex((r) => r.id === active.id);
+    const newIndex = sortedRows.findIndex((r) => r.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = [...sortedRows];
+    const [moved] = reordered.splice(oldIndex, 1);
+    reordered.splice(newIndex, 0, moved!);
+    reorderRows.mutate(reordered.map((r) => r.id));
+  }
+
+  const nextGroup = nextGroupLetter(section.rows ?? []);
+
+  return (
+    <div>
+      {/* Section header */}
+      <div className="flex items-center gap-2 my-2">
+        <div className="h-px flex-1 bg-gray-800" />
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1">
+          {section.name}
+        </span>
+        <button
+          onClick={() => onAddRow(section.id, nextGroup)}
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-brand-400 transition-colors px-1"
+          title="Add row"
+        >
+          <Plus size={12} /> row
+        </button>
+        <button
+          onClick={onDeleteSection}
+          className="text-gray-700 hover:text-red-400 transition-colors"
+        >
+          <Trash2 size={12} />
+        </button>
+        <div className="h-px flex-1 bg-gray-800" />
+      </div>
+
+      {/* Column headers */}
+      <div className={cn(GRID_COLS, 'text-xs text-gray-600 px-1 pb-1')}>
+        <div />
+        <div>Exercise</div>
+        <div>Variant</div>
+        <div className="text-center">Sets</div>
+        <div>Volume</div>
+        <div className="text-center">Value</div>
+        <div className="text-center">Rest</div>
+        <div className="text-center">Grp</div>
+        <div />
+      </div>
+
+      {/* Rows */}
+      {sortedRows.length === 0 ? (
+        <p className="text-xs text-gray-700 italic px-8 py-1">
+          Empty — click "+ row" above to add.
+        </p>
+      ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={sortedRows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-1">
+              {sortedRows.map((row) => (
+                <SortableRow
+                  key={row.id}
+                  id={row.id}
+                  row={row}
+                  exercises={exercises}
+                  onRefresh={onRefresh}
+                  onDelete={() => deleteRow.mutate(row.id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main SessionEditor
+// ---------------------------------------------------------------------------
+
+interface SessionEditorProps {
+  session: SessionDto;
+  exercises: ExerciseDto[];
+  planId: string;
+  onRefresh: () => void;
 }
 
 export function SessionEditor({ session, exercises, planId, onRefresh }: SessionEditorProps) {
@@ -225,10 +431,7 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
         name,
         order: session.sections?.length ?? 0,
       }),
-    onSuccess: () => {
-      onRefresh();
-      setSectionName('');
-    },
+    onSuccess: () => { onRefresh(); setSectionName(''); },
   });
 
   const deleteSection = useMutation({
@@ -237,92 +440,43 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
   });
 
   const createRow = useMutation({
-    mutationFn: ({ sectionId, exerciseId }: { sectionId: string; exerciseId: string }) =>
-      api.post('/sessions/rows', {
+    mutationFn: ({ sectionId, groupKey }: { sectionId: string; groupKey: string }) => {
+      const section = session.sections?.find((s) => s.id === sectionId);
+      const order = section?.rows?.length ?? 0;
+      return api.post('/sessions/rows', {
         sectionId,
-        exerciseId,
-        order: 0,
+        exerciseId: exercises[0]?.id ?? '',
+        order,
+        groupKey,
         volumeType: 'NUMBER',
         volumeValue: '10',
         sets: 3,
         restMinutes: 2,
-      }),
-    onSuccess: onRefresh,
-  });
-
-  const deleteRow = useMutation({
-    mutationFn: (id: string) => api.delete(`/sessions/rows/${id}`),
+      });
+    },
     onSuccess: onRefresh,
   });
 
   return (
-    <div className="space-y-4">
-      {/* Column headers */}
-      <div className="grid grid-cols-12 text-xs text-gray-500 px-2 gap-2 hidden lg:grid">
-        <div className="col-span-3">Exercise</div>
-        <div className="col-span-2">Variant</div>
-        <div>Sets</div>
-        <div className="col-span-2">Volume</div>
-        <div>Rest</div>
-        <div>Grp</div>
-      </div>
-
+    <div className="space-y-2">
       {session.sections?.map((section) => (
-        <div key={section.id}>
-          {/* Section header */}
-          <div className="flex items-center gap-2 mb-2">
-            <div className="h-px flex-1 bg-gray-800" />
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-              {section.name}
-            </span>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => {
-                if (exercises.length === 0) return;
-                createRow.mutate({ sectionId: section.id, exerciseId: exercises[0]!.id });
-              }}
-              title="Add row"
-            >
-              <Plus size={12} />
-            </Button>
-            <Button
-              size="icon"
-              variant="danger"
-              onClick={() => deleteSection.mutate(section.id)}
-            >
-              <Trash2 size={12} />
-            </Button>
-            <div className="h-px flex-1 bg-gray-800" />
-          </div>
-
-          {/* Rows */}
-          <div className="space-y-1">
-            {section.rows?.map((row) => (
-              <RowEditor
-                key={row.id}
-                row={row}
-                exercises={exercises}
-                onRefresh={onRefresh}
-                onDelete={() => deleteRow.mutate(row.id)}
-              />
-            ))}
-            {section.rows?.length === 0 && (
-              <p className="text-xs text-gray-600 italic px-2">
-                No exercises. Click + to add.
-              </p>
-            )}
-          </div>
-        </div>
+        <SectionEditor
+          key={section.id}
+          section={section}
+          exercises={exercises}
+          onRefresh={onRefresh}
+          onDeleteSection={() => deleteSection.mutate(section.id)}
+          onAddRow={(sectionId, groupKey) => createRow.mutate({ sectionId, groupKey })}
+        />
       ))}
 
       {/* Add section */}
-      <div className="flex gap-2 mt-3">
+      <div className="flex gap-2 mt-3 pt-3 border-t border-gray-800/60">
         <input
           type="text"
           value={sectionName}
           onChange={(e) => setSectionName(e.target.value)}
-          placeholder="Section name (e.g. Strength, Skill work)"
+          placeholder="New section name (e.g. Strength, Skill work)"
           className="input text-sm flex-1"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && sectionName.trim()) createSection.mutate(sectionName.trim());
@@ -332,9 +486,7 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
           variant="ghost"
           size="sm"
           loading={createSection.isPending}
-          onClick={() => {
-            if (sectionName.trim()) createSection.mutate(sectionName.trim());
-          }}
+          onClick={() => { if (sectionName.trim()) createSection.mutate(sectionName.trim()); }}
         >
           <Plus size={14} />
           Add Section
