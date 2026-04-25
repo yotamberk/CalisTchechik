@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Plus, Trash2, GripVertical, ExternalLink, MessageSquare } from 'lucide-react';
 import {
@@ -15,6 +15,7 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
+  arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { api } from '@/lib/api';
@@ -337,7 +338,8 @@ function SectionEditor({
 
   const reorderRows = useMutation({
     mutationFn: (orderedIds: string[]) => api.post('/sessions/rows/reorder', { orderedIds }),
-    onSuccess: onRefresh,
+    // No onSuccess refresh — local state already reflects the new order instantly.
+    // Parent will eventually refresh (e.g. on next data load) and sync.
   });
 
   const deleteRow = useMutation({
@@ -345,23 +347,38 @@ function SectionEditor({
     onSuccess: onRefresh,
   });
 
-  // Sort: group same groupKeys together
-  const sortedRows = [...(section.rows ?? [])].sort((a, b) => {
-    const gA = a.groupKey ?? `\x00${String(a.order).padStart(6, '0')}`;
-    const gB = b.groupKey ?? `\x00${String(b.order).padStart(6, '0')}`;
-    if (gA !== gB) return gA < gB ? -1 : 1;
-    return a.order - b.order;
-  });
+  // Compute server-sorted rows (groups adjacent)
+  function sortRows(rows: ExerciseRowDto[]) {
+    return [...rows].sort((a, b) => {
+      const gA = a.groupKey ?? `\x00${String(a.order).padStart(6, '0')}`;
+      const gB = b.groupKey ?? `\x00${String(b.order).padStart(6, '0')}`;
+      if (gA !== gB) return gA < gB ? -1 : 1;
+      return a.order - b.order;
+    });
+  }
+
+  // Local row order — updated instantly on drag, synced from server on refresh
+  const [localRows, setLocalRows] = useState<ExerciseRowDto[]>(() =>
+    sortRows(section.rows ?? []),
+  );
+
+  // Sync from server when section.rows changes (after add/delete/refresh)
+  useEffect(() => {
+    setLocalRows(sortRows(section.rows ?? []));
+  }, [section.rows]);
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIdx = sortedRows.findIndex((r) => r.id === active.id);
-    const newIdx = sortedRows.findIndex((r) => r.id === over.id);
+    const oldIdx = localRows.findIndex((r) => r.id === active.id);
+    const newIdx = localRows.findIndex((r) => r.id === over.id);
     if (oldIdx === -1 || newIdx === -1) return;
-    const reordered = [...sortedRows];
-    const [moved] = reordered.splice(oldIdx, 1);
-    reordered.splice(newIdx, 0, moved!);
+
+    // 1. Update local state immediately — no jump
+    const reordered = arrayMove(localRows, oldIdx, newIdx);
+    setLocalRows(reordered);
+
+    // 2. Persist to server in background
     reorderRows.mutate(reordered.map((r) => r.id));
   }
 
@@ -385,13 +402,13 @@ function SectionEditor({
         <div className="h-px flex-1 bg-gray-800" />
       </div>
 
-      {sortedRows.length === 0 ? (
+      {localRows.length === 0 ? (
         <p className="text-xs text-gray-700 italic pl-10 py-1">Empty — click "+ row" above.</p>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={sortedRows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+          <SortableContext items={localRows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
             <div className="space-y-0.5">
-              {sortedRows.map((row) => (
+              {localRows.map((row) => (
                 <SortableRow
                   key={row.id} id={row.id}
                   row={row} exercises={exercises}
