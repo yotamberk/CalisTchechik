@@ -342,7 +342,6 @@ export function TraineePlanPage() {
                                 <p className="text-xs text-gray-500 mt-0.5">
                                   {row.sets} × {formatVolumeLabel(row.volumeType, row.volumeValue)}
                                   {row.restMinutes > 0 && ` · Rest ${row.restMinutes}min`}
-                                  {row.breakMinutes > 0 && ` · Break ${row.breakMinutes}min`}
                                 </p>
 
                                 {/* Trainer row feedback */}

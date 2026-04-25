@@ -72,7 +72,6 @@ export const CreateExerciseRowSchema = z.object({
   restMinutes: z.number().default(2),
   volumeType: VolumeTypeEnum.default('NUMBER'),
   volumeValue: z.string().default('10'),
-  breakMinutes: z.number().default(1),
   sets: z.number().int().default(3),
 });
 

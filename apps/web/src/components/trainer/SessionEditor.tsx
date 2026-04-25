@@ -154,20 +154,6 @@ function RowEditor({ row, exercises, onRefresh, onDelete }: RowEditorProps) {
         <span className="text-xs text-gray-500">min</span>
       </div>
 
-      {/* Break */}
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <span className="text-xs text-gray-500">Break</span>
-        <input
-          type="number"
-          min={0}
-          step={0.5}
-          value={row.breakMinutes}
-          onChange={(e) => updateRow.mutate({ breakMinutes: parseFloat(e.target.value) })}
-          className="input w-14 text-sm py-1.5 text-center px-1"
-        />
-        <span className="text-xs text-gray-500">min</span>
-      </div>
-
       {/* Group key */}
       <input
         type="text"

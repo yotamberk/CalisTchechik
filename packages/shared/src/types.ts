@@ -45,7 +45,6 @@ export interface ExerciseRowDto {
   restMinutes: number;
   volumeType: VolumeType;
   volumeValue: string;
-  breakMinutes: number;
   sets: number;
   feedback?: TrainerFeedbackDto[];
 }
