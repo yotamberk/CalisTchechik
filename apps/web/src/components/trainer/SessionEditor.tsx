@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Plus, Trash2, GripVertical, ExternalLink, MessageSquare } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ExternalLink, MessageSquare, X } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -92,18 +92,19 @@ export function SessionColumnHeader() {
 // ---------------------------------------------------------------------------
 
 function SortableRow({
-  id, row, exercises, onUpdate, onDelete,
+  id, row, exercises, onUpdate, onDelete, onRefresh,
 }: {
   id: string;
   row: ExerciseRowDto;
   exercises: ExerciseDto[];
   onUpdate: (data: Partial<ExerciseRowDto>) => void;
   onDelete: () => void;
+  onRefresh: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.45 : 1 }}>
-      <RowEditor row={row} exercises={exercises} onUpdate={onUpdate} onDelete={onDelete} dragHandleProps={{ ...attributes, ...listeners }} />
+      <RowEditor row={row} exercises={exercises} onUpdate={onUpdate} onDelete={onDelete} onRefresh={onRefresh} dragHandleProps={{ ...attributes, ...listeners }} />
     </div>
   );
 }
@@ -113,15 +114,15 @@ function SortableRow({
 // ---------------------------------------------------------------------------
 
 function RowEditor({
-  row, exercises, onUpdate, onDelete, dragHandleProps,
+  row, exercises, onUpdate, onDelete, onRefresh, dragHandleProps,
 }: {
   row: ExerciseRowDto;
   exercises: ExerciseDto[];
   onUpdate: (data: Partial<ExerciseRowDto>) => void;
   onDelete: () => void;
+  onRefresh: () => void;
   dragHandleProps?: Record<string, unknown>;
 }) {
-  // Local state — all edits are instant; only syncs from props when row.id changes
   const [exerciseId, setExerciseId] = useState(row.exerciseId);
   const [variantId, setVariantId] = useState(row.variantId ?? '');
   const [sets, setSets] = useState(String(row.sets));
@@ -132,7 +133,6 @@ function RowEditor({
   const [feedbackModal, setFeedbackModal] = useState(false);
   const [feedbackContent, setFeedbackContent] = useState('');
 
-  // Sync only when a different row is swapped in (e.g. after delete/reorder)
   const prevId = useRef(row.id);
   useEffect(() => {
     if (prevId.current !== row.id) {
@@ -149,141 +149,177 @@ function RowEditor({
 
   const addFeedback = useMutation({
     mutationFn: () => api.post('/feedback', { rowId: row.id, content: feedbackContent }),
-    onSuccess: () => { setFeedbackModal(false); setFeedbackContent(''); },
+    onSuccess: () => { setFeedbackContent(''); onRefresh(); },
+  });
+
+  const deleteFeedback = useMutation({
+    mutationFn: (id: string) => api.delete(`/feedback/${id}`),
+    onSuccess: onRefresh,
   });
 
   const exercise = exercises.find((e) => e.id === exerciseId);
   const noValue = NO_VALUE_TYPES.has(volumeType);
+  const hasFeedback = (row.feedback?.length ?? 0) > 0;
 
   return (
-    <div style={GRID_STYLE} className="py-1 rounded-lg bg-gray-800/40">
-      {/* Colour strip */}
-      <div className={cn('w-1 self-stretch rounded-l-lg', groupBg(groupKey || null))} />
+    <div className="rounded-lg bg-gray-800/40 overflow-hidden">
+      {/* Grid row */}
+      <div style={GRID_STYLE} className="py-1">
+        {/* Colour strip */}
+        <div className={cn('w-1 self-stretch rounded-l-lg', groupBg(groupKey || null))} />
 
-      {/* Drag handle */}
-      <div className="flex items-center justify-center text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing touch-none" {...dragHandleProps}>
-        <GripVertical size={14} />
-      </div>
+        {/* Drag handle */}
+        <div className="flex items-center justify-center text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing touch-none" {...dragHandleProps}>
+          <GripVertical size={14} />
+        </div>
 
-      {/* Exercise — fire immediately on change */}
-      <select
-        value={exerciseId}
-        onChange={(e) => {
-          setExerciseId(e.target.value);
-          setVariantId('');
-          onUpdate({ exerciseId: e.target.value, variantId: null });
-        }}
-        className="input text-xs py-1 truncate"
-      >
-        {exercises.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
-      </select>
+        {/* Exercise */}
+        <select value={exerciseId}
+          onChange={(e) => { setExerciseId(e.target.value); setVariantId(''); onUpdate({ exerciseId: e.target.value, variantId: null }); }}
+          className="input text-xs py-1 truncate">
+          {exercises.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+        </select>
 
-      {/* Variant — fire immediately on change */}
-      <select
-        value={variantId}
-        onChange={(e) => {
-          setVariantId(e.target.value);
-          onUpdate({ variantId: e.target.value || null });
-        }}
-        className="input text-xs py-1"
-        disabled={!exercise || exercise.variants.length === 0}
-      >
-        <option value="">—</option>
-        {exercise?.variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-      </select>
+        {/* Variant */}
+        <select value={variantId}
+          onChange={(e) => { setVariantId(e.target.value); onUpdate({ variantId: e.target.value || null }); }}
+          className="input text-xs py-1" disabled={!exercise || exercise.variants.length === 0}>
+          <option value="">—</option>
+          {exercise?.variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </select>
 
-      {/* Sets — local until blur */}
-      <input
-        type="number" min={1}
-        value={sets}
-        onChange={(e) => setSets(e.target.value)}
-        onBlur={() => {
-          const v = parseInt(sets) || 1;
-          setSets(String(v));
-          onUpdate({ sets: v });
-        }}
-        className="input text-xs py-1 text-center px-1 w-full"
-      />
+        {/* Sets */}
+        <input type="number" min={1} value={sets}
+          onChange={(e) => setSets(e.target.value)}
+          onBlur={() => { const v = parseInt(sets) || 1; setSets(String(v)); onUpdate({ sets: v }); }}
+          className="input text-xs py-1 text-center px-1 w-full" />
 
-      {/* Volume type — fire immediately */}
-      <select
-        value={volumeType}
-        onChange={(e) => {
-          const vt = e.target.value as ExerciseRowDto['volumeType'];
-          const vv = NO_VALUE_TYPES.has(vt) ? '' : volumeValue;
-          setVolumeType(vt);
-          setVolumeValue(vv);
-          onUpdate({ volumeType: vt, volumeValue: vv });
-        }}
-        className="input text-xs py-1"
-      >
-        {VOLUME_TYPES.map((vt) => <option key={vt.value} value={vt.value}>{vt.label}</option>)}
-      </select>
-
-      {/* Volume value — local until blur */}
-      <input
-        type="text"
-        value={volumeValue}
-        onChange={(e) => setVolumeValue(e.target.value)}
-        onBlur={() => onUpdate({ volumeValue })}
-        className="input text-xs py-1 text-center px-1 w-full"
-        placeholder={noValue ? '—' : '10'}
-        disabled={noValue}
-      />
-
-      {/* Rest — local until blur */}
-      <div className="flex items-center gap-0.5">
-        <input
-          type="number" min={0} step={0.5}
-          value={restMinutes}
-          onChange={(e) => setRestMinutes(e.target.value)}
-          onBlur={() => {
-            const v = parseFloat(restMinutes) || 0;
-            setRestMinutes(String(v));
-            onUpdate({ restMinutes: v });
+        {/* Volume type */}
+        <select value={volumeType}
+          onChange={(e) => {
+            const vt = e.target.value as ExerciseRowDto['volumeType'];
+            const vv = NO_VALUE_TYPES.has(vt) ? '' : volumeValue;
+            setVolumeType(vt); setVolumeValue(vv);
+            onUpdate({ volumeType: vt, volumeValue: vv });
           }}
+          className="input text-xs py-1">
+          {VOLUME_TYPES.map((vt) => <option key={vt.value} value={vt.value}>{vt.label}</option>)}
+        </select>
+
+        {/* Volume value */}
+        <input type="text" value={volumeValue}
+          onChange={(e) => setVolumeValue(e.target.value)}
+          onBlur={() => onUpdate({ volumeValue })}
           className="input text-xs py-1 text-center px-1 w-full"
-        />
-        <span className="text-xs text-gray-600 flex-shrink-0">'</span>
+          placeholder={noValue ? '—' : '10'} disabled={noValue} />
+
+        {/* Rest */}
+        <div className="flex items-center gap-0.5">
+          <input type="number" min={0} step={0.5} value={restMinutes}
+            onChange={(e) => setRestMinutes(e.target.value)}
+            onBlur={() => { const v = parseFloat(restMinutes) || 0; setRestMinutes(String(v)); onUpdate({ restMinutes: v }); }}
+            className="input text-xs py-1 text-center px-1 w-full" />
+          <span className="text-xs text-gray-600 flex-shrink-0">'</span>
+        </div>
+
+        {/* Group key */}
+        <input type="text" value={groupKey}
+          onChange={(e) => { const v = e.target.value.toUpperCase(); setGroupKey(v); onUpdate({ groupKey: v || null }); }}
+          maxLength={2} className="input text-xs py-1 text-center px-1 w-full font-mono" placeholder="—" />
+
+        {/* Actions */}
+        <div className="flex items-center gap-0.5 pr-1">
+          {(exercise?.videoUrl || row.variant?.videoUrl) && (
+            <a href={row.variant?.videoUrl ?? exercise?.videoUrl ?? '#'} target="_blank" rel="noopener noreferrer"
+              className="p-1 text-gray-500 hover:text-brand-400 rounded transition-colors">
+              <ExternalLink size={12} />
+            </a>
+          )}
+          {/* Note button — blue dot when note exists */}
+          <button
+            onClick={() => setFeedbackModal(true)}
+            className={cn(
+              'relative p-1 rounded transition-colors',
+              hasFeedback ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-blue-400',
+            )}
+            title={hasFeedback ? 'View / edit note' : 'Add note'}
+          >
+            <MessageSquare size={12} />
+            {hasFeedback && (
+              <span className="absolute top-0 right-0 w-1.5 h-1.5 bg-blue-400 rounded-full" />
+            )}
+          </button>
+          <button onClick={onDelete} className="p-1 text-gray-600 hover:text-red-400 rounded transition-colors">
+            <Trash2 size={12} />
+          </button>
+        </div>
       </div>
 
-      {/* Group key — fire immediately on change */}
-      <input
-        type="text"
-        value={groupKey}
-        onChange={(e) => {
-          const v = e.target.value.toUpperCase();
-          setGroupKey(v);
-          onUpdate({ groupKey: v || null });
-        }}
-        maxLength={2}
-        className="input text-xs py-1 text-center px-1 w-full font-mono"
-        placeholder="—"
-      />
+      {/* Inline note preview */}
+      {hasFeedback && (
+        <div className="flex items-start gap-1.5 px-3 pb-1.5 pt-0">
+          <MessageSquare size={10} className="text-blue-400 mt-0.5 flex-shrink-0" />
+          <p
+            className="text-xs text-blue-300 italic leading-relaxed cursor-pointer hover:text-blue-200"
+            onClick={() => setFeedbackModal(true)}
+          >
+            {row.feedback![0]!.content}
+            {(row.feedback?.length ?? 0) > 1 && (
+              <span className="ml-1 text-blue-500 not-italic">+{row.feedback!.length - 1} more</span>
+            )}
+          </p>
+        </div>
+      )}
 
-      {/* Actions */}
-      <div className="flex items-center gap-0.5 pr-1">
-        {(exercise?.videoUrl || row.variant?.videoUrl) && (
-          <a href={row.variant?.videoUrl ?? exercise?.videoUrl ?? '#'} target="_blank" rel="noopener noreferrer"
-            className="p-1 text-gray-500 hover:text-brand-400 rounded transition-colors">
-            <ExternalLink size={12} />
-          </a>
-        )}
-        <button onClick={() => setFeedbackModal(true)} className="p-1 text-gray-500 hover:text-blue-400 rounded transition-colors">
-          <MessageSquare size={12} />
-        </button>
-        <button onClick={onDelete} className="p-1 text-gray-600 hover:text-red-400 rounded transition-colors">
-          <Trash2 size={12} />
-        </button>
-      </div>
-
-      <Modal open={feedbackModal} onClose={() => setFeedbackModal(false)} title="Add Exercise Feedback" className="max-w-md">
+      {/* Feedback modal */}
+      <Modal
+        open={feedbackModal}
+        onClose={() => setFeedbackModal(false)}
+        title="Exercise Notes"
+        className="max-w-md"
+      >
         <div className="space-y-4">
-          <textarea value={feedbackContent} onChange={(e) => setFeedbackContent(e.target.value)}
-            rows={3} className="input resize-none" placeholder="Feedback for this exercise..." />
+          {/* Existing notes */}
+          {hasFeedback && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Existing notes</p>
+              {row.feedback!.map((fb) => (
+                <div key={fb.id} className="flex items-start gap-2 p-2.5 bg-blue-900/20 border border-blue-800/30 rounded-lg">
+                  <p className="text-sm text-blue-200 flex-1 leading-relaxed">{fb.content}</p>
+                  <button
+                    onClick={() => deleteFeedback.mutate(fb.id)}
+                    className="text-gray-600 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add new note */}
+          <div>
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+              {hasFeedback ? 'Add another note' : 'Add note'}
+            </p>
+            <textarea
+              value={feedbackContent}
+              onChange={(e) => setFeedbackContent(e.target.value)}
+              rows={3} className="input resize-none"
+              placeholder="Notes for this exercise..."
+            />
+          </div>
+
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setFeedbackModal(false)}>Cancel</Button>
-            <Button variant="primary" loading={addFeedback.isPending} onClick={() => addFeedback.mutate()}>Save</Button>
+            <Button variant="secondary" onClick={() => setFeedbackModal(false)}>Close</Button>
+            <Button
+              variant="primary"
+              loading={addFeedback.isPending}
+              disabled={!feedbackContent.trim()}
+              onClick={() => addFeedback.mutate()}
+            >
+              Save Note
+            </Button>
           </div>
         </div>
       </Modal>
@@ -404,6 +440,7 @@ function SectionEditor({
                   row={row} exercises={exercises}
                   onUpdate={(data) => handleRowUpdate(row.id, data)}
                   onDelete={() => handleDeleteRow(row.id)}
+                  onRefresh={onRefresh}
                 />
               ))}
             </div>
