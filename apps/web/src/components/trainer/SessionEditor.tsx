@@ -6,9 +6,11 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  DragOverlay,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -359,7 +361,31 @@ function sortRowsKeepGroupOrder(rows: ExerciseRowDto[]): ExerciseRowDto[] {
 }
 
 // ---------------------------------------------------------------------------
-// Inner sortable row (used inside a group block's inner DnD)
+// Static row display (used inside DragOverlay — no DnD, no mutations)
+// ---------------------------------------------------------------------------
+
+function RowDisplay({ row, exercises }: { row: ExerciseRowDto; exercises: ExerciseDto[] }) {
+  const exercise = exercises.find((e) => e.id === row.exerciseId);
+  const noValue = NO_VALUE_TYPES.has(row.volumeType);
+  const volLabel = VOLUME_TYPES.find((v) => v.value === row.volumeType)?.label ?? row.volumeType;
+  return (
+    <div style={GRID_STYLE} className="py-1 rounded-lg bg-gray-800/60 pointer-events-none select-none">
+      <div className={cn('w-1 self-stretch rounded-l-lg', groupBg(row.groupKey))} />
+      <div className="flex items-center justify-center text-gray-600"><GripVertical size={14} /></div>
+      <span className="text-xs text-gray-300 truncate pl-1">{exercise?.name ?? '—'}</span>
+      <span className="text-xs text-gray-500 truncate">{row.variant?.name ?? '—'}</span>
+      <span className="text-xs text-gray-400 text-center">{row.sets}</span>
+      <span className="text-xs text-gray-500">{volLabel}</span>
+      <span className="text-xs text-gray-400 text-center">{noValue ? '—' : row.volumeValue}</span>
+      <span className="text-xs text-gray-400 text-center">{row.restMinutes}'</span>
+      <span className="text-xs text-gray-400 text-center font-mono">{row.groupKey ?? '—'}</span>
+      <div />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inner sortable row (inside a group block's inner DnD)
 // ---------------------------------------------------------------------------
 
 function InnerSortableRow({
@@ -374,8 +400,11 @@ function InnerSortableRow({
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   return (
-    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn('rounded-lg transition-opacity', isDragging ? 'opacity-50' : 'opacity-100')}>
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn('rounded-lg', isDragging && 'opacity-0')}
+    >
       <RowEditor row={row} exercises={exercises} onUpdate={onUpdate} onDelete={onDelete}
         onRefresh={onRefresh} dragHandleProps={{ ...attributes, ...listeners }} />
     </div>
@@ -383,12 +412,11 @@ function InnerSortableRow({
 }
 
 // ---------------------------------------------------------------------------
-// Sortable group block (used inside section's outer DnD)
+// Sortable group block
 // ---------------------------------------------------------------------------
 
 function SortableGroupBlock({
-  block, exercises, onRowUpdate, onRowDelete, onRowRefresh,
-  reorderRowsInGroup,
+  block, exercises, onRowUpdate, onRowDelete, onRowRefresh, reorderRowsInGroup,
 }: {
   block: RowBlock;
   exercises: ExerciseDto[];
@@ -397,64 +425,57 @@ function SortableGroupBlock({
   onRowRefresh: () => void;
   reorderRowsInGroup: (groupKey: string, orderedIds: string[]) => void;
 }) {
-  // Outer DnD: this whole block is one draggable item
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: block.blockId,
   });
 
-  // Inner DnD sensors (for reordering rows within the group)
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
   const innerSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
   function handleInnerDragEnd(event: DragEndEvent) {
+    setActiveRowId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const oldIdx = block.rows.findIndex((r) => r.id === active.id);
     const newIdx = block.rows.findIndex((r) => r.id === over.id);
     if (oldIdx === -1 || newIdx === -1) return;
-    const reordered = arrayMove(block.rows, oldIdx, newIdx);
-    reorderRowsInGroup(block.blockId, reordered.map((r) => r.id));
+    reorderRowsInGroup(block.blockId, arrayMove(block.rows, oldIdx, newIdx).map((r) => r.id));
   }
 
-  const color = groupBg(block.isGroup ? block.rows[0]?.groupKey : null);
+  const activeRow = activeRowId ? block.rows.find((r) => r.id === activeRowId) : null;
+  const stripColor = groupBg(block.rows[0]?.groupKey ?? null);
 
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(
-        'rounded-lg transition-opacity',
-        isDragging ? 'opacity-50 ring-2 ring-brand-500' : 'opacity-100',
-      )}
+      className={cn('rounded-lg', isDragging && 'opacity-0')}
     >
       {block.isGroup ? (
-        // --- Group block ---
-        <div className="rounded-lg overflow-hidden border border-gray-700/40">
-          {/* Group header — outer DnD handle */}
+        // --- Group block: left colored strip = outer drag handle ---
+        <div className="flex flex-row gap-0 rounded-lg overflow-hidden">
+          {/* Left strip — outer DnD handle, spans full group height */}
           <div
             className={cn(
-              'flex items-center gap-2 px-2 py-1 bg-gray-800/80 border-b border-gray-700/40',
+              'w-3 flex-shrink-0 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none',
+              stripColor, 'opacity-70 hover:opacity-100 transition-opacity',
             )}
-          >
-            <div
-              className="flex items-center gap-1.5 cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300 touch-none"
-              {...attributes}
-              {...listeners}
-            >
-              <GripVertical size={14} />
-            </div>
-            <div className={cn('w-2 h-2 rounded-full flex-shrink-0', color)} />
-            <span className="text-xs font-semibold text-gray-300 font-mono">
-              Group {block.rows[0]?.groupKey}
-            </span>
-            <span className="text-xs text-gray-600">· {block.rows.length} rows</span>
-          </div>
+            title="Drag to reorder group"
+            {...attributes}
+            {...listeners}
+          />
 
-          {/* Inner DnD for reordering rows within the group */}
-          <DndContext sensors={innerSensors} collisionDetection={closestCenter} onDragEnd={handleInnerDragEnd}>
-            <SortableContext items={block.rows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-0.5 p-0.5">
+          {/* Rows — inner DnD for reordering within group */}
+          <div className="flex-1 space-y-px">
+            <DndContext
+              sensors={innerSensors}
+              collisionDetection={closestCenter}
+              onDragStart={(e: DragStartEvent) => setActiveRowId(e.active.id as string)}
+              onDragEnd={handleInnerDragEnd}
+            >
+              <SortableContext items={block.rows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
                 {block.rows.map((row) => (
                   <InnerSortableRow
                     key={row.id} id={row.id}
@@ -464,12 +485,15 @@ function SortableGroupBlock({
                     onRefresh={onRowRefresh}
                   />
                 ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+              </SortableContext>
+              <DragOverlay dropAnimation={null}>
+                {activeRow && <RowDisplay row={activeRow} exercises={exercises} />}
+              </DragOverlay>
+            </DndContext>
+          </div>
         </div>
       ) : (
-        // --- Ungrouped single row — outer DnD handle is the row's grip ---
+        // --- Ungrouped row — outer DnD handle is the row's grip ---
         <RowEditor
           row={block.rows[0]!}
           exercises={exercises}
@@ -504,6 +528,7 @@ function SectionEditor({
   const [localRows, setLocalRows] = useState<ExerciseRowDto[]>(() =>
     sortRowsKeepGroupOrder(section.rows ?? []),
   );
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalRows(sortRowsKeepGroupOrder(section.rows ?? []));
@@ -559,6 +584,7 @@ function SectionEditor({
 
   // Outer DnD: move entire blocks (groups or ungrouped rows)
   function handleOuterDragEnd(event: DragEndEvent) {
+    setActiveBlockId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const blocks = getBlocks(localRows);
@@ -571,6 +597,7 @@ function SectionEditor({
   }
 
   const blocks = getBlocks(localRows);
+  const activeBlock = activeBlockId ? blocks.find((b) => b.blockId === activeBlockId) : null;
   const nextGroup = nextGroupLetter(localRows);
 
   return (
@@ -591,7 +618,12 @@ function SectionEditor({
       {blocks.length === 0 ? (
         <p className="text-xs text-gray-700 italic pl-10 py-1">Empty — click "+ row" above.</p>
       ) : (
-        <DndContext sensors={outerSensors} collisionDetection={closestCenter} onDragEnd={handleOuterDragEnd}>
+        <DndContext
+          sensors={outerSensors}
+          collisionDetection={closestCenter}
+          onDragStart={(e: DragStartEvent) => setActiveBlockId(e.active.id as string)}
+          onDragEnd={handleOuterDragEnd}
+        >
           <SortableContext items={blocks.map((b) => b.blockId)} strategy={verticalListSortingStrategy}>
             <div className="space-y-1">
               {blocks.map((block) => (
@@ -607,6 +639,26 @@ function SectionEditor({
               ))}
             </div>
           </SortableContext>
+
+          {/* Outer overlay — renders dragged block at its original size */}
+          <DragOverlay dropAnimation={null}>
+            {activeBlock && (
+              <div className="rounded-lg ring-2 ring-brand-500 opacity-90 shadow-2xl">
+                {activeBlock.isGroup ? (
+                  <div className="flex flex-row rounded-lg overflow-hidden">
+                    <div className={cn('w-3 flex-shrink-0', groupBg(activeBlock.rows[0]?.groupKey ?? null), 'opacity-80')} />
+                    <div className="flex-1 space-y-px">
+                      {activeBlock.rows.map((row) => (
+                        <RowDisplay key={row.id} row={row} exercises={exercises} />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <RowDisplay row={activeBlock.rows[0]!} exercises={exercises} />
+                )}
+              </div>
+            )}
+          </DragOverlay>
         </DndContext>
       )}
     </div>
