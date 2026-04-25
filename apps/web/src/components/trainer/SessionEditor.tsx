@@ -82,7 +82,7 @@ function nextGroupLetter(rows: ExerciseRowDto[]): string {
 
 const GRID_STYLE: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '4px 24px minmax(120px,1.8fr) minmax(100px,1fr) 52px 120px 56px 72px 48px auto',
+  gridTemplateColumns: '4px 24px minmax(120px,1.8fr) minmax(100px,1fr) 52px 120px 56px 72px 48px 76px',
   gap: '0 6px',
   alignItems: 'center',
 };
