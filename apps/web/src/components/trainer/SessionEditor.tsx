@@ -9,7 +9,6 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragOverEvent,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -92,33 +91,6 @@ export function SessionColumnHeader() {
 // Sortable wrapper
 // ---------------------------------------------------------------------------
 
-function SortableRow({
-  id, row, exercises, onUpdate, onDelete, onRefresh, dragInvalid,
-}: {
-  id: string;
-  row: ExerciseRowDto;
-  exercises: ExerciseDto[];
-  onUpdate: (data: Partial<ExerciseRowDto>) => void;
-  onDelete: () => void;
-  onRefresh: () => void;
-  dragInvalid?: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(
-        'rounded-lg transition-all duration-100',
-        isDragging && dragInvalid && 'ring-2 ring-red-500 opacity-60',
-        isDragging && !dragInvalid && 'ring-2 ring-brand-500 opacity-70',
-        !isDragging && 'opacity-100',
-      )}
-    >
-      <RowEditor row={row} exercises={exercises} onUpdate={onUpdate} onDelete={onDelete} onRefresh={onRefresh} dragHandleProps={{ ...attributes, ...listeners }} />
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Row editor — fully local state, optimistic by design
@@ -339,40 +311,176 @@ function RowEditor({
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Data helpers
 // ---------------------------------------------------------------------------
 
-/** Returns true if any group's rows are non-adjacent in the given order. */
-function isGroupSplit(rows: ExerciseRowDto[]): boolean {
-  const lastIdx = new Map<string, number>();
-  for (let i = 0; i < rows.length; i++) {
-    const key = rows[i]!.groupKey;
-    if (!key) continue;
-    const prev = lastIdx.get(key);
-    if (prev !== undefined && prev !== i - 1) return true;
-    lastIdx.set(key, i);
+type RowBlock = {
+  blockId: string;       // groupKey for grouped rows, row.id for ungrouped
+  isGroup: boolean;
+  rows: ExerciseRowDto[];
+};
+
+/** Group rows into blocks preserving order. */
+function getBlocks(rows: ExerciseRowDto[]): RowBlock[] {
+  const blocks: RowBlock[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!row.groupKey) {
+      blocks.push({ blockId: row.id, isGroup: false, rows: [row] });
+    } else if (!seen.has(row.groupKey)) {
+      seen.add(row.groupKey);
+      blocks.push({
+        blockId: row.groupKey,
+        isGroup: true,
+        rows: rows.filter((r) => r.groupKey === row.groupKey),
+      });
+    }
   }
-  return false;
+  return blocks;
 }
 
-/**
- * Sort rows so same-group rows are adjacent.
- * Group order is determined by the first occurrence of each groupKey,
- * preserving the trainer's intentional group ordering.
- */
-function sortRowsKeepGroupOrder(rows: ExerciseRowDto[]): ExerciseRowDto[] {
-  // Build first-occurrence index for each group key
-  const groupFirstIdx = new Map<string, number>();
-  rows.forEach((r, i) => {
-    if (r.groupKey && !groupFirstIdx.has(r.groupKey)) groupFirstIdx.set(r.groupKey, i);
-  });
+/** Flatten blocks back to ordered row array. */
+function flattenBlocks(blocks: RowBlock[]): ExerciseRowDto[] {
+  return blocks.flatMap((b) => b.rows);
+}
 
+/** Sort rows so groups are adjacent (by first-occurrence of group key). */
+function sortRowsKeepGroupOrder(rows: ExerciseRowDto[]): ExerciseRowDto[] {
+  const firstIdx = new Map<string, number>();
+  rows.forEach((r, i) => {
+    if (r.groupKey && !firstIdx.has(r.groupKey)) firstIdx.set(r.groupKey, i);
+  });
   return [...rows].sort((a, b) => {
     if (a.groupKey === b.groupKey) return a.order - b.order;
-    const posA = a.groupKey ? (groupFirstIdx.get(a.groupKey) ?? a.order) : a.order;
-    const posB = b.groupKey ? (groupFirstIdx.get(b.groupKey) ?? b.order) : b.order;
+    const posA = a.groupKey ? (firstIdx.get(a.groupKey) ?? a.order) : a.order;
+    const posB = b.groupKey ? (firstIdx.get(b.groupKey) ?? b.order) : b.order;
     return posA - posB;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Inner sortable row (used inside a group block's inner DnD)
+// ---------------------------------------------------------------------------
+
+function InnerSortableRow({
+  id, row, exercises, onUpdate, onDelete, onRefresh,
+}: {
+  id: string;
+  row: ExerciseRowDto;
+  exercises: ExerciseDto[];
+  onUpdate: (data: Partial<ExerciseRowDto>) => void;
+  onDelete: () => void;
+  onRefresh: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn('rounded-lg transition-opacity', isDragging ? 'opacity-50' : 'opacity-100')}>
+      <RowEditor row={row} exercises={exercises} onUpdate={onUpdate} onDelete={onDelete}
+        onRefresh={onRefresh} dragHandleProps={{ ...attributes, ...listeners }} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sortable group block (used inside section's outer DnD)
+// ---------------------------------------------------------------------------
+
+function SortableGroupBlock({
+  block, exercises, onRowUpdate, onRowDelete, onRowRefresh,
+  reorderRowsInGroup,
+}: {
+  block: RowBlock;
+  exercises: ExerciseDto[];
+  onRowUpdate: (rowId: string, data: Partial<ExerciseRowDto>) => void;
+  onRowDelete: (rowId: string) => void;
+  onRowRefresh: () => void;
+  reorderRowsInGroup: (groupKey: string, orderedIds: string[]) => void;
+}) {
+  // Outer DnD: this whole block is one draggable item
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: block.blockId,
+  });
+
+  // Inner DnD sensors (for reordering rows within the group)
+  const innerSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  function handleInnerDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = block.rows.findIndex((r) => r.id === active.id);
+    const newIdx = block.rows.findIndex((r) => r.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(block.rows, oldIdx, newIdx);
+    reorderRowsInGroup(block.blockId, reordered.map((r) => r.id));
+  }
+
+  const color = groupBg(block.isGroup ? block.rows[0]?.groupKey : null);
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        'rounded-lg transition-opacity',
+        isDragging ? 'opacity-50 ring-2 ring-brand-500' : 'opacity-100',
+      )}
+    >
+      {block.isGroup ? (
+        // --- Group block ---
+        <div className="rounded-lg overflow-hidden border border-gray-700/40">
+          {/* Group header — outer DnD handle */}
+          <div
+            className={cn(
+              'flex items-center gap-2 px-2 py-1 bg-gray-800/80 border-b border-gray-700/40',
+            )}
+          >
+            <div
+              className="flex items-center gap-1.5 cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300 touch-none"
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical size={14} />
+            </div>
+            <div className={cn('w-2 h-2 rounded-full flex-shrink-0', color)} />
+            <span className="text-xs font-semibold text-gray-300 font-mono">
+              Group {block.rows[0]?.groupKey}
+            </span>
+            <span className="text-xs text-gray-600">· {block.rows.length} rows</span>
+          </div>
+
+          {/* Inner DnD for reordering rows within the group */}
+          <DndContext sensors={innerSensors} collisionDetection={closestCenter} onDragEnd={handleInnerDragEnd}>
+            <SortableContext items={block.rows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-0.5 p-0.5">
+                {block.rows.map((row) => (
+                  <InnerSortableRow
+                    key={row.id} id={row.id}
+                    row={row} exercises={exercises}
+                    onUpdate={(data) => onRowUpdate(row.id, data)}
+                    onDelete={() => onRowDelete(row.id)}
+                    onRefresh={onRowRefresh}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        </div>
+      ) : (
+        // --- Ungrouped single row — outer DnD handle is the row's grip ---
+        <RowEditor
+          row={block.rows[0]!}
+          exercises={exercises}
+          onUpdate={(data) => onRowUpdate(block.rows[0]!.id, data)}
+          onDelete={() => onRowDelete(block.rows[0]!.id)}
+          onRefresh={onRowRefresh}
+          dragHandleProps={{ ...attributes, ...listeners }}
+        />
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -388,7 +496,7 @@ function SectionEditor({
   onDeleteSection: () => void;
   onAddRow: (sectionId: string, groupKey: string) => void;
 }) {
-  const sensors = useSensors(
+  const outerSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
@@ -396,45 +504,37 @@ function SectionEditor({
   const [localRows, setLocalRows] = useState<ExerciseRowDto[]>(() =>
     sortRowsKeepGroupOrder(section.rows ?? []),
   );
-  const [dragInvalid, setDragInvalid] = useState(false);
 
-  // Sync from server on external changes (add/delete row)
   useEffect(() => {
     setLocalRows(sortRowsKeepGroupOrder(section.rows ?? []));
   }, [section.rows]);
 
-  // --- Mutations ---
   const updateRowApi = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<ExerciseRowDto> }) =>
       api.patch(`/sessions/rows/${id}`, data),
   });
-
   const reorderApi = useMutation({
     mutationFn: (orderedIds: string[]) => api.post('/sessions/rows/reorder', { orderedIds }),
   });
-
   const deleteRowApi = useMutation({
     mutationFn: (id: string) => api.delete(`/sessions/rows/${id}`),
   });
 
-  // --- Row update — optimistic, re-sorts when groupKey changes ---
+  // Optimistic row update — auto-sorts when groupKey changes
   const handleRowUpdate = useCallback((rowId: string, data: Partial<ExerciseRowDto>) => {
     setLocalRows((prev) => {
       const snapshot = prev;
       let next = prev.map((r) => (r.id === rowId ? { ...r, ...data } : r));
-
-      // If groupKey changed, re-sort so the row moves adjacent to its group
       if ('groupKey' in data) {
         next = sortRowsKeepGroupOrder(next);
         reorderApi.mutate(next.map((r) => r.id));
       }
-
       updateRowApi.mutate({ id: rowId, data }, { onError: () => setLocalRows(snapshot) });
       return next;
     });
   }, []);
 
-  // --- Delete — optimistic ---
+  // Optimistic delete
   const handleDeleteRow = useCallback((rowId: string) => {
     setLocalRows((prev) => {
       const snapshot = prev;
@@ -443,33 +543,34 @@ function SectionEditor({
     });
   }, []);
 
-  // --- Drag: validate during hover ---
-  function handleDragOver(event: DragOverEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) { setDragInvalid(false); return; }
-    const oldIdx = localRows.findIndex((r) => r.id === active.id);
-    const newIdx = localRows.findIndex((r) => r.id === over.id);
-    if (oldIdx === -1 || newIdx === -1) return;
-    setDragInvalid(isGroupSplit(arrayMove(localRows, oldIdx, newIdx)));
-  }
+  // Reorder rows within a group (inner DnD)
+  const reorderRowsInGroup = useCallback((groupKey: string, orderedIds: string[]) => {
+    setLocalRows((prev) => {
+      let gIdx = 0;
+      const next = prev.map((r) => {
+        if (r.groupKey !== groupKey) return r;
+        const targetId = orderedIds[gIdx++];
+        return prev.find((x) => x.id === targetId) ?? r;
+      });
+      reorderApi.mutate(next.map((r) => r.id));
+      return next;
+    });
+  }, []);
 
-  function handleDragEnd(event: DragEndEvent) {
-    setDragInvalid(false);
+  // Outer DnD: move entire blocks (groups or ungrouped rows)
+  function handleOuterDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIdx = localRows.findIndex((r) => r.id === active.id);
-    const newIdx = localRows.findIndex((r) => r.id === over.id);
+    const blocks = getBlocks(localRows);
+    const oldIdx = blocks.findIndex((b) => b.blockId === active.id);
+    const newIdx = blocks.findIndex((b) => b.blockId === over.id);
     if (oldIdx === -1 || newIdx === -1) return;
-
-    const reordered = arrayMove(localRows, oldIdx, newIdx);
-
-    // Reject drop that would split a group — item snaps back automatically
-    if (isGroupSplit(reordered)) return;
-
+    const reordered = flattenBlocks(arrayMove(blocks, oldIdx, newIdx));
     setLocalRows(reordered);
     reorderApi.mutate(reordered.map((r) => r.id));
   }
 
+  const blocks = getBlocks(localRows);
   const nextGroup = nextGroupLetter(localRows);
 
   return (
@@ -487,28 +588,21 @@ function SectionEditor({
         <div className="h-px flex-1 bg-gray-800" />
       </div>
 
-      {localRows.length === 0 ? (
+      {blocks.length === 0 ? (
         <p className="text-xs text-gray-700 italic pl-10 py-1">Empty — click "+ row" above.</p>
       ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext items={localRows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-            <div className={cn(
-              'space-y-0.5 rounded-lg transition-all duration-150',
-              dragInvalid && 'ring-1 ring-red-500/60 bg-red-950/20',
-            )}>
-              {localRows.map((row) => (
-                <SortableRow
-                  key={row.id} id={row.id}
-                  row={row} exercises={exercises}
-                  onUpdate={(data) => handleRowUpdate(row.id, data)}
-                  onDelete={() => handleDeleteRow(row.id)}
-                  onRefresh={onRefresh}
-                  dragInvalid={dragInvalid}
+        <DndContext sensors={outerSensors} collisionDetection={closestCenter} onDragEnd={handleOuterDragEnd}>
+          <SortableContext items={blocks.map((b) => b.blockId)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-1">
+              {blocks.map((block) => (
+                <SortableGroupBlock
+                  key={block.blockId}
+                  block={block}
+                  exercises={exercises}
+                  onRowUpdate={handleRowUpdate}
+                  onRowDelete={handleDeleteRow}
+                  onRowRefresh={onRefresh}
+                  reorderRowsInGroup={reorderRowsInGroup}
                 />
               ))}
             </div>
