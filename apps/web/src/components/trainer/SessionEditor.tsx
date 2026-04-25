@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Plus, Trash2, GripVertical, ExternalLink, MessageSquare } from 'lucide-react';
 import {
@@ -20,7 +20,6 @@ import { CSS } from '@dnd-kit/utilities';
 import { api } from '@/lib/api';
 import type { SessionDto, SectionDto, ExerciseDto, ExerciseRowDto } from '@calist/shared';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { cn } from '@/lib/utils';
 
@@ -39,25 +38,25 @@ const VOLUME_TYPES = [
 const NO_VALUE_TYPES = new Set(['MAX', 'MAX_HOLD']);
 
 // ---------------------------------------------------------------------------
-// Group colour strip
+// Group colour strip — a dedicated 4px column, not a border
 // ---------------------------------------------------------------------------
 
-const GROUP_COLORS = [
-  'border-l-sky-500',
-  'border-l-violet-500',
-  'border-l-amber-500',
-  'border-l-rose-500',
-  'border-l-emerald-500',
-  'border-l-orange-500',
-  'border-l-cyan-500',
-  'border-l-pink-500',
-];
+const GROUP_BG: Record<number, string> = {
+  0: 'bg-sky-500',
+  1: 'bg-violet-500',
+  2: 'bg-amber-500',
+  3: 'bg-rose-500',
+  4: 'bg-emerald-500',
+  5: 'bg-orange-500',
+  6: 'bg-cyan-500',
+  7: 'bg-pink-500',
+};
 
-function groupColor(key: string | null | undefined): string {
-  if (!key) return 'border-l-transparent';
+function groupBg(key: string | null | undefined): string {
+  if (!key) return 'bg-transparent';
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) & 0xff;
-  return GROUP_COLORS[h % GROUP_COLORS.length] ?? 'border-l-sky-500';
+  return GROUP_BG[h % 8] ?? 'bg-sky-500';
 }
 
 // ---------------------------------------------------------------------------
@@ -74,35 +73,63 @@ function nextGroupLetter(rows: ExerciseRowDto[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Shared column grid style — applied to header AND each row so they align
+// Shared grid — colour-strip is column 1, so header and rows are identical
+// Columns: strip(4px) | grip(24px) | exercise(1.8fr) | variant(1fr) |
+//          sets(52px) | vol-type(120px) | vol-value(56px) | rest(72px) |
+//          group(48px) | actions(auto)
 // ---------------------------------------------------------------------------
-// Columns: grip | exercise | variant | sets | vol-type | vol-value | rest | group | actions
-const GRID_COLS =
-  'grid grid-cols-[24px_minmax(120px,1.8fr)_minmax(100px,1fr)_52px_120px_56px_72px_48px_auto] gap-x-2 items-center';
+
+const GRID_STYLE: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '4px 24px minmax(120px,1.8fr) minmax(100px,1fr) 52px 120px 56px 72px 48px auto',
+  gap: '0 6px',
+  alignItems: 'center',
+};
+
+// ---------------------------------------------------------------------------
+// Column header (rendered once above all sections)
+// ---------------------------------------------------------------------------
+
+export function SessionColumnHeader() {
+  return (
+    <div style={GRID_STYLE} className="text-xs text-gray-500 px-0 pb-1 select-none">
+      <div /> {/* strip */}
+      <div /> {/* grip */}
+      <div className="pl-1">Exercise</div>
+      <div>Variant</div>
+      <div className="text-center">Sets</div>
+      <div>Volume</div>
+      <div className="text-center">Value</div>
+      <div className="text-center">Rest</div>
+      <div className="text-center">Grp</div>
+      <div />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Sortable row wrapper
 // ---------------------------------------------------------------------------
 
-interface SortableRowProps {
+function SortableRow({
+  id,
+  row,
+  exercises,
+  onRefresh,
+  onDelete,
+}: {
   id: string;
   row: ExerciseRowDto;
   exercises: ExerciseDto[];
   onRefresh: () => void;
   onDelete: () => void;
-}
-
-function SortableRow({ id, row, exercises, onRefresh, onDelete }: SortableRowProps) {
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
   return (
-    <div ref={setNodeRef} style={style}>
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.45 : 1 }}
+    >
       <RowEditor
         row={row}
         exercises={exercises}
@@ -118,15 +145,19 @@ function SortableRow({ id, row, exercises, onRefresh, onDelete }: SortableRowPro
 // Row editor
 // ---------------------------------------------------------------------------
 
-interface RowEditorProps {
+function RowEditor({
+  row,
+  exercises,
+  onRefresh,
+  onDelete,
+  dragHandleProps,
+}: {
   row: ExerciseRowDto;
   exercises: ExerciseDto[];
   onRefresh: () => void;
   onDelete: () => void;
   dragHandleProps?: Record<string, unknown>;
-}
-
-function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: RowEditorProps) {
+}) {
   const exercise = exercises.find((e) => e.id === row.exerciseId);
   const [feedbackModal, setFeedbackModal] = useState(false);
   const [feedbackContent, setFeedbackContent] = useState('');
@@ -145,12 +176,12 @@ function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: Row
 
   return (
     <div
-      className={cn(
-        GRID_COLS,
-        'py-1.5 px-1 rounded-lg bg-gray-800/40 border-l-2',
-        groupColor(row.groupKey),
-      )}
+      style={GRID_STYLE}
+      className="py-1 rounded-lg bg-gray-800/40"
     >
+      {/* Colour strip */}
+      <div className={cn('w-1 self-stretch rounded-l-lg', groupBg(row.groupKey))} />
+
       {/* Drag handle */}
       <div
         className="flex items-center justify-center text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing touch-none"
@@ -185,8 +216,7 @@ function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: Row
 
       {/* Sets */}
       <input
-        type="number"
-        min={1}
+        type="number" min={1}
         value={row.sets}
         onChange={(e) => updateRow.mutate({ sets: parseInt(e.target.value) || 1 })}
         className="input text-xs py-1 text-center px-1 w-full"
@@ -221,9 +251,7 @@ function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: Row
       {/* Rest */}
       <div className="flex items-center gap-0.5">
         <input
-          type="number"
-          min={0}
-          step={0.5}
+          type="number" min={0} step={0.5}
           value={row.restMinutes}
           onChange={(e) => updateRow.mutate({ restMinutes: parseFloat(e.target.value) || 0 })}
           className="input text-xs py-1 text-center px-1 w-full"
@@ -242,12 +270,11 @@ function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: Row
       />
 
       {/* Actions */}
-      <div className="flex items-center gap-0.5 justify-end">
+      <div className="flex items-center gap-0.5 pr-1">
         {(exercise?.videoUrl || row.variant?.videoUrl) && (
           <a
             href={row.variant?.videoUrl ?? exercise?.videoUrl ?? '#'}
-            target="_blank"
-            rel="noopener noreferrer"
+            target="_blank" rel="noopener noreferrer"
             className="p-1 text-gray-500 hover:text-brand-400 rounded transition-colors"
           >
             <ExternalLink size={12} />
@@ -268,25 +295,17 @@ function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: Row
       </div>
 
       {/* Feedback modal */}
-      <Modal
-        open={feedbackModal}
-        onClose={() => setFeedbackModal(false)}
-        title="Add Exercise Feedback"
-        className="max-w-md"
-      >
+      <Modal open={feedbackModal} onClose={() => setFeedbackModal(false)} title="Add Exercise Feedback" className="max-w-md">
         <div className="space-y-4">
           <textarea
             value={feedbackContent}
             onChange={(e) => setFeedbackContent(e.target.value)}
-            rows={3}
-            className="input resize-none"
+            rows={3} className="input resize-none"
             placeholder="Feedback for this exercise..."
           />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setFeedbackModal(false)}>Cancel</Button>
-            <Button variant="primary" loading={addFeedback.isPending} onClick={() => addFeedback.mutate()}>
-              Save
-            </Button>
+            <Button variant="primary" loading={addFeedback.isPending} onClick={() => addFeedback.mutate()}>Save</Button>
           </div>
         </div>
       </Modal>
@@ -298,15 +317,19 @@ function RowEditor({ row, exercises, onRefresh, onDelete, dragHandleProps }: Row
 // Section component with DnD
 // ---------------------------------------------------------------------------
 
-interface SectionEditorProps {
+function SectionEditor({
+  section,
+  exercises,
+  onRefresh,
+  onDeleteSection,
+  onAddRow,
+}: {
   section: SectionDto;
   exercises: ExerciseDto[];
   onRefresh: () => void;
   onDeleteSection: () => void;
   onAddRow: (sectionId: string, groupKey: string) => void;
-}
-
-function SectionEditor({ section, exercises, onRefresh, onDeleteSection, onAddRow }: SectionEditorProps) {
+}) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -322,10 +345,10 @@ function SectionEditor({ section, exercises, onRefresh, onDeleteSection, onAddRo
     onSuccess: onRefresh,
   });
 
-  // Sort rows: group same groupKeys together, preserve relative order within group
+  // Sort: group same groupKeys together
   const sortedRows = [...(section.rows ?? [])].sort((a, b) => {
-    const gA = a.groupKey ?? `\x00${a.order}`;
-    const gB = b.groupKey ?? `\x00${b.order}`;
+    const gA = a.groupKey ?? `\x00${String(a.order).padStart(6, '0')}`;
+    const gB = b.groupKey ?? `\x00${String(b.order).padStart(6, '0')}`;
     if (gA !== gB) return gA < gB ? -1 : 1;
     return a.order - b.order;
   });
@@ -333,14 +356,12 @@ function SectionEditor({ section, exercises, onRefresh, onDeleteSection, onAddRo
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-
-    const oldIndex = sortedRows.findIndex((r) => r.id === active.id);
-    const newIndex = sortedRows.findIndex((r) => r.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
+    const oldIdx = sortedRows.findIndex((r) => r.id === active.id);
+    const newIdx = sortedRows.findIndex((r) => r.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
     const reordered = [...sortedRows];
-    const [moved] = reordered.splice(oldIndex, 1);
-    reordered.splice(newIndex, 0, moved!);
+    const [moved] = reordered.splice(oldIdx, 1);
+    reordered.splice(newIdx, 0, moved!);
     reorderRows.mutate(reordered.map((r) => r.id));
   }
 
@@ -348,56 +369,32 @@ function SectionEditor({ section, exercises, onRefresh, onDeleteSection, onAddRo
 
   return (
     <div>
-      {/* Section header */}
+      {/* Section divider */}
       <div className="flex items-center gap-2 my-2">
         <div className="h-px flex-1 bg-gray-800" />
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1">
-          {section.name}
-        </span>
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{section.name}</span>
         <button
           onClick={() => onAddRow(section.id, nextGroup)}
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-brand-400 transition-colors px-1"
-          title="Add row"
+          className="flex items-center gap-0.5 text-xs text-gray-500 hover:text-brand-400 transition-colors"
         >
-          <Plus size={12} /> row
+          <Plus size={11} /> row
         </button>
-        <button
-          onClick={onDeleteSection}
-          className="text-gray-700 hover:text-red-400 transition-colors"
-        >
-          <Trash2 size={12} />
+        <button onClick={onDeleteSection} className="text-gray-700 hover:text-red-400 transition-colors">
+          <Trash2 size={11} />
         </button>
         <div className="h-px flex-1 bg-gray-800" />
       </div>
 
-      {/* Column headers */}
-      <div className={cn(GRID_COLS, 'text-xs text-gray-600 px-1 pb-1')}>
-        <div />
-        <div>Exercise</div>
-        <div>Variant</div>
-        <div className="text-center">Sets</div>
-        <div>Volume</div>
-        <div className="text-center">Value</div>
-        <div className="text-center">Rest</div>
-        <div className="text-center">Grp</div>
-        <div />
-      </div>
-
-      {/* Rows */}
       {sortedRows.length === 0 ? (
-        <p className="text-xs text-gray-700 italic px-8 py-1">
-          Empty — click "+ row" above to add.
-        </p>
+        <p className="text-xs text-gray-700 italic pl-10 py-1">Empty — click "+ row" above.</p>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={sortedRows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {sortedRows.map((row) => (
                 <SortableRow
-                  key={row.id}
-                  id={row.id}
-                  row={row}
-                  exercises={exercises}
+                  key={row.id} id={row.id}
+                  row={row} exercises={exercises}
                   onRefresh={onRefresh}
                   onDelete={() => deleteRow.mutate(row.id)}
                 />
@@ -441,12 +438,11 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
 
   const createRow = useMutation({
     mutationFn: ({ sectionId, groupKey }: { sectionId: string; groupKey: string }) => {
-      const section = session.sections?.find((s) => s.id === sectionId);
-      const order = section?.rows?.length ?? 0;
+      const sec = session.sections?.find((s) => s.id === sectionId);
       return api.post('/sessions/rows', {
         sectionId,
         exerciseId: exercises[0]?.id ?? '',
-        order,
+        order: sec?.rows?.length ?? 0,
         groupKey,
         volumeType: 'NUMBER',
         volumeValue: '10',
@@ -457,8 +453,13 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
     onSuccess: onRefresh,
   });
 
+  const hasSections = (session.sections?.length ?? 0) > 0;
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
+      {/* Single column header row for the whole session */}
+      {hasSections && <SessionColumnHeader />}
+
       {session.sections?.map((section) => (
         <SectionEditor
           key={section.id}
@@ -483,13 +484,11 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
           }}
         />
         <Button
-          variant="ghost"
-          size="sm"
+          variant="ghost" size="sm"
           loading={createSection.isPending}
           onClick={() => { if (sectionName.trim()) createSection.mutate(sectionName.trim()); }}
         >
-          <Plus size={14} />
-          Add Section
+          <Plus size={14} /> Add Section
         </Button>
       </div>
     </div>
