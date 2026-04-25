@@ -246,7 +246,6 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
         volumeValue: '10',
         sets: 3,
         restMinutes: 2,
-        breakMinutes: 1,
       }),
     onSuccess: onRefresh,
   });
@@ -265,7 +264,6 @@ export function SessionEditor({ session, exercises, planId, onRefresh }: Session
         <div>Sets</div>
         <div className="col-span-2">Volume</div>
         <div>Rest</div>
-        <div>Break</div>
         <div>Grp</div>
       </div>
 
