@@ -20,6 +20,7 @@ weeksRouter.post('/', requireRole('TRAINER', 'ADMIN'), async (req, res) => {
         planId: parsed.data.planId,
         weekNumber: parsed.data.weekNumber,
         startDate: new Date(parsed.data.startDate),
+        endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
         notes: parsed.data.notes,
       },
       include: {
@@ -45,8 +46,9 @@ weeksRouter.post('/', requireRole('TRAINER', 'ADMIN'), async (req, res) => {
 // Update week
 weeksRouter.patch('/:id', requireRole('TRAINER', 'ADMIN'), async (req, res) => {
   try {
-    const { startDate, notes, weekNumber } = req.body as {
+    const { startDate, endDate, notes, weekNumber } = req.body as {
       startDate?: string;
+      endDate?: string | null;
       notes?: string;
       weekNumber?: number;
     };
@@ -55,6 +57,7 @@ weeksRouter.patch('/:id', requireRole('TRAINER', 'ADMIN'), async (req, res) => {
       where: { id: req.params['id'] },
       data: {
         ...(startDate && { startDate: new Date(startDate) }),
+        ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
         ...(notes !== undefined && { notes }),
         ...(weekNumber !== undefined && { weekNumber }),
       },

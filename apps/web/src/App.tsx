@@ -16,6 +16,8 @@ import { PlansPage } from '@/pages/trainer/PlansPage';
 import { PlanDetailPage } from '@/pages/trainer/PlanDetailPage';
 import { TraineePlanPage } from '@/pages/trainee/TraineePlanPage';
 import { TraineeProgressPage } from '@/pages/trainee/TraineeProgressPage';
+import { SessionPlayerPage } from '@/pages/trainee/SessionPlayerPage';
+import { TraineeHistoryPage } from '@/pages/trainee/TraineeHistoryPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuthStore();
@@ -162,6 +164,22 @@ export default function App() {
           element={
             <RequireRole roles={['TRAINEE', 'TRAINER', 'ADMIN']}>
               <TraineeProgressPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/trainee/history"
+          element={
+            <RequireRole roles={['TRAINEE', 'TRAINER', 'ADMIN']}>
+              <TraineeHistoryPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/trainee/session/:sessionId"
+          element={
+            <RequireRole roles={['TRAINEE', 'TRAINER', 'ADMIN']}>
+              <SessionPlayerPage />
             </RequireRole>
           }
         />

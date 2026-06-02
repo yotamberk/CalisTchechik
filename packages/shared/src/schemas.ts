@@ -40,12 +40,14 @@ export const CreatePlanSchema = z.object({
   traineeId: z.string(),
   name: z.string().min(1),
   startDate: z.string(),
+  endDate: z.string().optional().nullable(),
 });
 
 export const CreateWeekSchema = z.object({
   planId: z.string(),
   weekNumber: z.number().int().positive(),
   startDate: z.string(),
+  endDate: z.string().optional().nullable(),
   notes: z.string().optional(),
 });
 
@@ -73,12 +75,14 @@ export const CreateExerciseRowSchema = z.object({
   volumeType: VolumeTypeEnum.default('NUMBER'),
   volumeValue: z.string().default('10'),
   sets: z.number().int().default(3),
+  skipRating: z.boolean().default(false),
 });
 
 export const UpdateExerciseRowSchema = CreateExerciseRowSchema.partial();
 
 export const UpsertSessionLogSchema = z.object({
   sessionId: z.string(),
+  startedAt: z.string().optional().nullable(),
   performedOn: z.string().optional().nullable(),
   completedAt: z.string().optional().nullable(),
 });

@@ -38,11 +38,14 @@ logsRouter.post('/session', requireRole('TRAINEE'), async (req, res) => {
     }
 
     const traineeId = req.user!.impersonating || req.user!.userId;
-    const { sessionId, performedOn, completedAt } = parsed.data;
+    const { sessionId, startedAt, performedOn, completedAt } = parsed.data;
 
     const log = await prisma.sessionLog.upsert({
       where: { sessionId_traineeId: { sessionId, traineeId } },
       update: {
+        ...(startedAt !== undefined && {
+          startedAt: startedAt ? new Date(startedAt) : null,
+        }),
         ...(performedOn !== undefined && {
           performedOn: performedOn ? new Date(performedOn) : null,
         }),
@@ -53,6 +56,7 @@ logsRouter.post('/session', requireRole('TRAINEE'), async (req, res) => {
       create: {
         sessionId,
         traineeId,
+        startedAt: startedAt ? new Date(startedAt) : null,
         performedOn: performedOn ? new Date(performedOn) : null,
         completedAt: completedAt ? new Date(completedAt) : null,
       },
@@ -75,7 +79,7 @@ logsRouter.post('/row/:sessionLogId', requireRole('TRAINEE'), async (req, res) =
     }
 
     const { rowId, rpe, notes } = parsed.data;
-    const { sessionLogId } = req.params;
+    const sessionLogId = req.params['sessionLogId']!;
 
     const rowLog = await prisma.rowLog.upsert({
       where: { sessionLogId_rowId: { sessionLogId, rowId } },
@@ -98,7 +102,7 @@ logsRouter.post('/row/:sessionLogId', requireRole('TRAINEE'), async (req, res) =
   }
 });
 
-// Get all logs for a trainee (for dashboard)
+// Get all logs for a trainee (for dashboard / history)
 logsRouter.get('/trainee/:traineeId', async (req, res) => {
   try {
     const logs = await prisma.sessionLog.findMany({
@@ -107,6 +111,18 @@ logsRouter.get('/trainee/:traineeId', async (req, res) => {
         session: {
           include: {
             week: { include: { plan: true } },
+            sections: {
+              orderBy: { order: 'asc' },
+              include: {
+                rows: {
+                  orderBy: { order: 'asc' },
+                  include: {
+                    exercise: true,
+                    variant: true,
+                  },
+                },
+              },
+            },
           },
         },
         rowLogs: true,

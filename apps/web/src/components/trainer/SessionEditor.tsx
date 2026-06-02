@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Plus, Trash2, GripVertical, ExternalLink, MessageSquare, X } from 'lucide-react';
+import { Plus, Trash2, GripVertical, ExternalLink, MessageSquare, X, Flame } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -115,6 +115,7 @@ function RowEditor({
   const [volumeValue, setVolumeValue] = useState(row.volumeValue);
   const [restMinutes, setRestMinutes] = useState(String(row.restMinutes));
   const [groupKey, setGroupKey] = useState(row.groupKey ?? '');
+  const [skipRating, setSkipRating] = useState(row.skipRating ?? false);
   const [feedbackModal, setFeedbackModal] = useState(false);
   const [feedbackContent, setFeedbackContent] = useState('');
 
@@ -129,6 +130,7 @@ function RowEditor({
       setVolumeValue(row.volumeValue);
       setRestMinutes(String(row.restMinutes));
       setGroupKey(row.groupKey ?? '');
+      setSkipRating(row.skipRating ?? false);
     }
   });
 
@@ -220,6 +222,21 @@ function RowEditor({
               <ExternalLink size={12} />
             </a>
           )}
+          {/* Warm-up / skip rating toggle */}
+          <button
+            onClick={() => {
+              const next = !skipRating;
+              setSkipRating(next);
+              onUpdate({ skipRating: next });
+            }}
+            className={cn(
+              'p-1 rounded transition-colors',
+              skipRating ? 'text-amber-400 hover:text-amber-300' : 'text-gray-600 hover:text-amber-400',
+            )}
+            title={skipRating ? 'Warm-up: no difficulty rating (click to disable)' : 'Mark as warm-up (skip difficulty rating)'}
+          >
+            <Flame size={12} />
+          </button>
           {/* Note button — blue dot when note exists */}
           <button
             onClick={() => setFeedbackModal(true)}
@@ -379,7 +396,9 @@ function RowDisplay({ row, exercises }: { row: ExerciseRowDto; exercises: Exerci
       <span className="text-xs text-gray-400 text-center">{noValue ? '—' : row.volumeValue}</span>
       <span className="text-xs text-gray-400 text-center">{row.restMinutes}'</span>
       <span className="text-xs text-gray-400 text-center font-mono">{row.groupKey ?? '—'}</span>
-      <div />
+      <div className="flex items-center justify-center">
+        {row.skipRating && <Flame size={11} className="text-amber-400" />}
+      </div>
     </div>
   );
 }

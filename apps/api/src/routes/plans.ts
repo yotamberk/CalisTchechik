@@ -154,6 +154,7 @@ plansRouter.post('/', requireRole('TRAINER', 'ADMIN'), async (req, res) => {
         traineeId: parsed.data.traineeId,
         name: parsed.data.name,
         startDate: new Date(parsed.data.startDate),
+        endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
       },
       include: {
         trainee: { include: { roles: true } },
@@ -171,13 +172,14 @@ plansRouter.post('/', requireRole('TRAINER', 'ADMIN'), async (req, res) => {
 // Update plan
 plansRouter.patch('/:id', requireRole('TRAINER', 'ADMIN'), async (req, res) => {
   try {
-    const { name, startDate } = req.body as { name?: string; startDate?: string };
+    const { name, startDate, endDate } = req.body as { name?: string; startDate?: string; endDate?: string | null };
 
     const plan = await prisma.plan.update({
       where: { id: req.params['id'] },
       data: {
         ...(name && { name }),
         ...(startDate && { startDate: new Date(startDate) }),
+        ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
       },
       include: {
         trainee: { include: { roles: true } },

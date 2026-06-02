@@ -46,6 +46,7 @@ export interface ExerciseRowDto {
   volumeType: VolumeType;
   volumeValue: string;
   sets: number;
+  skipRating: boolean;
   feedback?: TrainerFeedbackDto[];
 }
 
@@ -71,6 +72,7 @@ export interface WeekDto {
   planId: string;
   weekNumber: number;
   startDate: string;
+  endDate?: string | null;
   notes?: string | null;
   sessions: SessionDto[];
   feedback?: TrainerFeedbackDto[];
@@ -82,6 +84,7 @@ export interface PlanDto {
   traineeId: string;
   name: string;
   startDate: string;
+  endDate?: string | null;
   trainee?: UserDto;
   weeks: WeekDto[];
 }
@@ -98,6 +101,7 @@ export interface SessionLogDto {
   id: string;
   sessionId: string;
   traineeId: string;
+  startedAt?: string | null;
   performedOn?: string | null;
   completedAt?: string | null;
   rowLogs: RowLogDto[];

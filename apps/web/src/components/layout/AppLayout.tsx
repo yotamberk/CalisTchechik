@@ -12,6 +12,7 @@ import {
   X,
   ShieldAlert,
   TrendingUp,
+  History,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { api } from '@/lib/api';
@@ -34,6 +35,7 @@ const navItems = {
   TRAINEE: [
     { to: '/trainee', label: 'My Plan', icon: ClipboardList },
     { to: '/trainee/progress', label: 'Progress', icon: TrendingUp },
+    { to: '/trainee/history', label: 'History', icon: History },
   ],
 };
 

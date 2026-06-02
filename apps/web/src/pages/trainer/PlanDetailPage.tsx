@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
-import { formatDate } from '@/lib/utils';
+import { formatDate, nextSundayStr, addDaysToStr } from '@/lib/utils';
 import { SessionEditor } from '@/components/trainer/SessionEditor';
 
 export function PlanDetailPage() {
@@ -26,7 +26,7 @@ export function PlanDetailPage() {
 
   const [selectedWeekId, setSelectedWeekId] = useState<string | null>(null);
   const [weekModal, setWeekModal] = useState(false);
-  const [weekForm, setWeekForm] = useState({ weekNumber: 1, startDate: '' });
+  const [weekForm, setWeekForm] = useState({ weekNumber: 1, startDate: '', endDate: '' });
   const [sessionModal, setSessionModal] = useState<{ open: boolean; weekId?: string }>({ open: false });
   const [sessionForm, setSessionForm] = useState({ name: '', order: 0 });
   const [feedbackModal, setFeedbackModal] = useState<{ open: boolean; weekId?: string }>({ open: false });
@@ -51,6 +51,7 @@ export function PlanDetailPage() {
         planId,
         weekNumber: weekForm.weekNumber,
         startDate: weekForm.startDate,
+        endDate: weekForm.endDate || null,
       }),
     onSuccess: (week) => {
       qc.invalidateQueries({ queryKey: ['plan', planId] });
@@ -146,7 +147,10 @@ export function PlanDetailPage() {
               }`}
             >
               <div className="font-medium">Week {week.weekNumber}</div>
-              <div className="text-xs opacity-70">{formatDate(week.startDate as unknown as string)}</div>
+              <div className="text-xs opacity-70">
+                {formatDate(week.startDate as unknown as string)}
+                {week.endDate ? ` – ${formatDate(week.endDate as unknown as string)}` : ''}
+              </div>
               <div className="text-xs opacity-50 mt-0.5">{week.sessions?.length ?? 0} sessions</div>
             </button>
           ))}
@@ -158,7 +162,11 @@ export function PlanDetailPage() {
             size="sm"
             className="w-full justify-center text-xs"
             onClick={() => {
-              setWeekForm({ weekNumber: nextWeekNumber, startDate: '' });
+              const lastWeek = plan.weeks?.[plan.weeks.length - 1];
+              const start = lastWeek?.endDate
+                ? addDaysToStr(lastWeek.endDate as unknown as string, 1)
+                : nextSundayStr();
+              setWeekForm({ weekNumber: nextWeekNumber, startDate: start, endDate: addDaysToStr(start, 7) });
               setWeekModal(true);
             }}
           >
@@ -176,7 +184,8 @@ export function PlanDetailPage() {
             <Button
               variant="primary"
               onClick={() => {
-                setWeekForm({ weekNumber: nextWeekNumber, startDate: '' });
+                const start = nextSundayStr();
+                setWeekForm({ weekNumber: nextWeekNumber, startDate: start, endDate: addDaysToStr(start, 7) });
                 setWeekModal(true);
               }}
             >
@@ -194,6 +203,7 @@ export function PlanDetailPage() {
                 </h2>
                 <p className="text-sm text-gray-400">
                   {formatDate(selectedWeek.startDate as unknown as string)}
+                  {selectedWeek.endDate ? ` → ${formatDate(selectedWeek.endDate as unknown as string)}` : ''}
                 </p>
                 {selectedWeek.notes && (
                   <p className="text-sm text-gray-300 mt-1 italic">"{selectedWeek.notes}"</p>
@@ -302,13 +312,25 @@ export function PlanDetailPage() {
             value={weekForm.weekNumber}
             onChange={(e) => setWeekForm((p) => ({ ...p, weekNumber: parseInt(e.target.value) }))}
           />
-          <Input
-            label="Start date"
-            type="date"
-            value={weekForm.startDate}
-            onChange={(e) => setWeekForm((p) => ({ ...p, startDate: e.target.value }))}
-            required
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Start date"
+              type="date"
+              value={weekForm.startDate}
+              onChange={(e) => {
+                const start = e.target.value;
+                setWeekForm((p) => ({ ...p, startDate: start, endDate: addDaysToStr(start, 7) }));
+              }}
+              required
+            />
+            <Input
+              label="End date"
+              type="date"
+              value={weekForm.endDate}
+              onChange={(e) => setWeekForm((p) => ({ ...p, endDate: e.target.value }))}
+            />
+          </div>
+          <p className="text-xs text-gray-500">Defaults to Sunday → Sunday. Adjust as needed.</p>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setWeekModal(false)}>Cancel</Button>
             <Button

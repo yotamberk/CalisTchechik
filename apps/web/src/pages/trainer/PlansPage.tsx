@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, ChevronRight, BookOpen } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, BookOpen, Calendar } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { UserDto, PlanDto } from '@calist/shared';
 import { Button } from '@/components/ui/Button';
@@ -9,12 +9,15 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Avatar';
-import { formatDate } from '@/lib/utils';
+import { formatDate, nextSundayStr, addDaysToStr } from '@/lib/utils';
 
 export function PlansPage() {
   const qc = useQueryClient();
   const [createModal, setCreateModal] = useState(false);
-  const [form, setForm] = useState({ traineeId: '', name: '', startDate: '' });
+
+  const defaultStart = nextSundayStr();
+  const defaultEnd = addDaysToStr(defaultStart, 7);
+  const [form, setForm] = useState({ traineeId: '', name: '', startDate: defaultStart, endDate: defaultEnd });
 
   const { data: plans = [], isLoading: loadingPlans } = useQuery({
     queryKey: ['plans'],
@@ -31,7 +34,8 @@ export function PlansPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['plans'] });
       setCreateModal(false);
-      setForm({ traineeId: '', name: '', startDate: '' });
+      const s = nextSundayStr();
+      setForm({ traineeId: '', name: '', startDate: s, endDate: addDaysToStr(s, 7) });
     },
   });
 
@@ -45,12 +49,16 @@ export function PlansPage() {
     createPlan.mutate(form);
   }
 
+  function handleStartDateChange(startDate: string) {
+    setForm((p) => ({ ...p, startDate, endDate: addDaysToStr(startDate, 7) }));
+  }
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Training Plans</h1>
-          <p className="text-gray-400 text-sm mt-1">Create and manage weekly training programs</p>
+          <p className="text-gray-400 text-sm mt-1">Create and manage training programs</p>
         </div>
         <Button variant="primary" onClick={() => setCreateModal(true)}>
           <Plus size={16} />
@@ -74,8 +82,13 @@ export function PlansPage() {
               )}
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-gray-100">{plan.name}</p>
-                <p className="text-sm text-gray-400">
-                  {plan.trainee?.name} · {plan.weeks?.length ?? 0} weeks · Started {formatDate(plan.startDate)}
+                <p className="text-sm text-gray-400 flex items-center gap-1">
+                  {plan.trainee?.name} · {plan.weeks?.length ?? 0} weeks
+                </p>
+                <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                  <Calendar size={11} />
+                  {formatDate(plan.startDate)}
+                  {plan.endDate ? ` → ${formatDate(plan.endDate)}` : ''}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -127,13 +140,22 @@ export function PlansPage() {
             placeholder="e.g. Strength Phase 1"
             required
           />
-          <Input
-            label="Start date"
-            type="date"
-            value={form.startDate}
-            onChange={(e) => setForm((p) => ({ ...p, startDate: e.target.value }))}
-            required
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Start date"
+              type="date"
+              value={form.startDate}
+              onChange={(e) => handleStartDateChange(e.target.value)}
+              required
+            />
+            <Input
+              label="End date"
+              type="date"
+              value={form.endDate}
+              onChange={(e) => setForm((p) => ({ ...p, endDate: e.target.value }))}
+            />
+          </div>
+          <p className="text-xs text-gray-500">Defaults to one week (Sunday → Sunday). Adjust as needed.</p>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setCreateModal(false)}>Cancel</Button>
             <Button type="submit" variant="primary" loading={createPlan.isPending}>

@@ -1,139 +1,65 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Clock, Calendar, ChevronDown, ChevronRight, ExternalLink, MessageSquare } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import {
+  CheckCircle2,
+  PlayCircle,
+  Clock,
+  ChevronRight,
+  MessageSquare,
+  Dumbbell,
+} from 'lucide-react';
 import { api } from '@/lib/api';
-import type { PlanDto, SessionDto, SessionLogDto, RowLogDto } from '@calist/shared';
+import type { PlanDto } from '@calist/shared';
+import { formatDate, formatVolumeLabel } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { formatDate, formatVolumeLabel } from '@/lib/utils';
-import { useAuthStore } from '@/store/authStore';
-import { addDays, parseISO, isWithinInterval } from 'date-fns';
-
-function RPESelector({
-  value,
-  onChange,
-}: {
-  value: number | null | undefined;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="flex gap-1 flex-wrap">
-      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-        <button
-          key={n}
-          onClick={() => onChange(n)}
-          className={`w-7 h-7 rounded text-xs font-medium transition-colors ${
-            value === n
-              ? n <= 3
-                ? 'bg-brand-600 text-white'
-                : n <= 7
-                ? 'bg-yellow-600 text-white'
-                : 'bg-red-600 text-white'
-              : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-          }`}
-        >
-          {n}
-        </button>
-      ))}
-    </div>
-  );
-}
+import { parseISO, isWithinInterval } from 'date-fns';
 
 export function TraineePlanPage() {
-  const { user } = useAuthStore();
-  const qc = useQueryClient();
+  const navigate = useNavigate();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [selectedWeekId, setSelectedWeekId] = useState<string | null>(null);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
 
   const { data: plans = [], isLoading } = useQuery({
     queryKey: ['trainee-plans'],
     queryFn: () => api.get<PlanDto[]>('/plans/trainee'),
   });
 
-  const { data: sessionLog, refetch: refetchLog } = useQuery({
-    queryKey: ['session-log', activeSessionId],
-    queryFn: () => api.get<SessionLogDto | null>(`/logs/session/${activeSessionId}`),
-    enabled: !!activeSessionId,
-  });
-
-  const upsertSessionLog = useMutation({
-    mutationFn: (data: { sessionId: string; performedOn?: string | null; completedAt?: string | null }) =>
-      api.post<SessionLogDto>('/logs/session', data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['session-log', activeSessionId] });
-      qc.invalidateQueries({ queryKey: ['trainee-plans'] });
-    },
-  });
-
-  const upsertRowLog = useMutation({
-    mutationFn: ({
-      sessionLogId,
-      rowId,
-      rpe,
-      notes,
-    }: {
-      sessionLogId: string;
-      rowId: string;
-      rpe?: number | null;
-      notes?: string | null;
-    }) => api.post<RowLogDto>(`/logs/row/${sessionLogId}`, { rowId, rpe, notes }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['session-log', activeSessionId] });
-    },
-  });
-
-  function toggleSession(id: string) {
-    setExpandedSessions((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   const currentPlan = selectedPlanId
-    ? plans.find((p) => p.id === selectedPlanId)
+    ? plans.find((p) => p.id === selectedPlanId) ?? plans[0] ?? null
     : plans[0] ?? null;
 
-  // Find current week
   const today = new Date();
+
   const currentWeek =
     currentPlan?.weeks?.find((w) => {
       const start = parseISO(w.startDate as unknown as string);
-      const end = addDays(start, 6);
+      const end = w.endDate
+        ? parseISO(w.endDate as unknown as string)
+        : new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
       return isWithinInterval(today, { start, end });
     }) ??
     currentPlan?.weeks?.[currentPlan.weeks.length - 1] ??
     null;
 
-  const displayWeek =
-    selectedWeekId
-      ? currentPlan?.weeks?.find((w) => w.id === selectedWeekId) ?? currentWeek
-      : currentWeek;
+  const displayWeek = selectedWeekId
+    ? currentPlan?.weeks?.find((w) => w.id === selectedWeekId) ?? currentWeek
+    : currentWeek;
 
-  function getRowLog(rowId: string): RowLogDto | undefined {
-    return sessionLog?.rowLogs.find((l) => l.rowId === rowId);
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[60vh]">
+        <div className="text-gray-500">Loading your plan...</div>
+      </div>
+    );
   }
-
-  async function handleMarkComplete(sessionId: string) {
-    await upsertSessionLog.mutateAsync({
-      sessionId,
-      completedAt: new Date().toISOString(),
-    });
-  }
-
-  async function handleSetPerformedOn(sessionId: string, date: string) {
-    await upsertSessionLog.mutateAsync({ sessionId, performedOn: date });
-  }
-
-  if (isLoading) return <div className="p-6 text-gray-500">Loading your plan...</div>;
 
   if (!currentPlan) {
     return (
       <div className="p-6 flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
+          <Dumbbell size={40} className="mx-auto mb-3 text-gray-700" />
           <p className="text-gray-400 text-lg font-medium">No training plan yet</p>
           <p className="text-gray-600 text-sm mt-2">Your trainer hasn't assigned a plan yet. Check back soon!</p>
         </div>
@@ -141,68 +67,94 @@ export function TraineePlanPage() {
     );
   }
 
+  const sessions = displayWeek?.sessions ?? [];
+  const completedCount = sessions.filter((s) => s.logs?.[0]?.completedAt).length;
+  const remainingCount = sessions.length - completedCount;
+
   return (
-    <div className="p-4 max-w-3xl mx-auto space-y-4">
+    <div className="p-4 max-w-2xl mx-auto space-y-5">
       {/* Plan selector */}
       {plans.length > 1 && (
-        <div>
-          <label className="label">Plan</label>
-          <select
-            className="input"
-            value={selectedPlanId ?? plans[0]?.id ?? ''}
-            onChange={(e) => setSelectedPlanId(e.target.value)}
-          >
-            {plans.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          className="input text-sm"
+          value={currentPlan.id}
+          onChange={(e) => { setSelectedPlanId(e.target.value); setSelectedWeekId(null); }}
+        >
+          {plans.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
       )}
 
-      {/* Week selector */}
+      {/* Week tabs */}
       {currentPlan.weeks && currentPlan.weeks.length > 1 && (
         <div className="flex gap-2 overflow-x-auto pb-1">
-          {currentPlan.weeks.map((week) => (
-            <button
-              key={week.id}
-              onClick={() => setSelectedWeekId(week.id)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                displayWeek?.id === week.id
-                  ? 'bg-brand-900/60 text-brand-400 border border-brand-800/50'
-                  : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              Week {week.weekNumber}
-            </button>
-          ))}
+          {currentPlan.weeks.map((week) => {
+            const isSelected = displayWeek?.id === week.id;
+            const weekSessions = week.sessions ?? [];
+            const weekDone = weekSessions.filter((s) => s.logs?.[0]?.completedAt).length;
+            return (
+              <button
+                key={week.id}
+                onClick={() => setSelectedWeekId(week.id)}
+                className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                  isSelected
+                    ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/40'
+                    : 'bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-750'
+                }`}
+              >
+                <div>Week {week.weekNumber}</div>
+                <div className="text-xs opacity-70 mt-0.5">{weekDone}/{weekSessions.length} done</div>
+              </button>
+            );
+          })}
         </div>
       )}
 
       {/* Week header */}
       {displayWeek && (
         <div className="card">
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-xl font-bold text-white">{currentPlan.name}</h1>
-              <p className="text-sm text-gray-400">
-                Week {displayWeek.weekNumber} · {formatDate(displayWeek.startDate as unknown as string)}
+              <h1 className="text-lg font-bold text-white">{currentPlan.name}</h1>
+              <p className="text-sm text-gray-400 mt-0.5">
+                Week {displayWeek.weekNumber}
+                {' · '}
+                {formatDate(displayWeek.startDate as unknown as string)}
+                {displayWeek.endDate ? ` → ${formatDate(displayWeek.endDate as unknown as string)}` : ''}
               </p>
+            </div>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-white">{remainingCount}</p>
+              <p className="text-xs text-gray-500">sessions left</p>
             </div>
           </div>
 
-          {/* Trainer feedback summary */}
+          {/* Progress bar */}
+          {sessions.length > 0 && (
+            <div className="mt-3">
+              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                <span>{completedCount} completed</span>
+                <span>{sessions.length} total</span>
+              </div>
+              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-brand-500 rounded-full transition-all"
+                  style={{ width: sessions.length ? `${(completedCount / sessions.length) * 100}%` : '0%' }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Trainer feedback */}
           {displayWeek.feedback && displayWeek.feedback.length > 0 && (
             <div className="mt-3 p-3 bg-blue-900/20 border border-blue-800/30 rounded-lg">
               <p className="text-xs font-semibold text-blue-400 mb-1 flex items-center gap-1">
                 <MessageSquare size={12} />
-                Trainer feedback
+                Trainer note
               </p>
-              {displayWeek.feedback.map((fb: { id: string; content: string; author?: { name: string } }) => (
-                <p key={fb.id} className="text-sm text-gray-300">
-                  {fb.content}
-                </p>
+              {displayWeek.feedback.map((fb) => (
+                <p key={fb.id} className="text-sm text-gray-300">{fb.content}</p>
               ))}
             </div>
           )}
@@ -213,211 +165,83 @@ export function TraineePlanPage() {
         </div>
       )}
 
-      {/* Sessions */}
-      {displayWeek?.sessions?.map((session) => {
-        const log = sessionLog && activeSessionId === session.id ? sessionLog : null;
-        const isExpanded = expandedSessions.has(session.id);
-        const isComplete = !!log?.completedAt;
-        const isActive = activeSessionId === session.id;
+      {/* Session cards */}
+      <div className="space-y-3">
+        {sessions.map((session) => {
+          const log = session.logs?.[0];
+          const isComplete = !!log?.completedAt;
+          const isInProgress = !!log?.startedAt && !log.completedAt;
+          const totalExercises = session.sections?.reduce((acc, s) => acc + (s.rows?.length ?? 0), 0) ?? 0;
 
-        return (
-          <div key={session.id} className={`card transition-all ${isComplete ? 'border-brand-800/50' : ''}`}>
-            {/* Session header */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => {
-                  if (!isActive) {
-                    setActiveSessionId(session.id);
-                    refetchLog();
-                  }
-                  toggleSession(session.id);
-                }}
-                className="flex items-center gap-3 flex-1 text-left"
-              >
+          return (
+            <button
+              key={session.id}
+              onClick={() => navigate(`/trainee/session/${session.id}`)}
+              className={`w-full card text-left transition-all hover:border-gray-600 active:scale-[0.99] ${
+                isComplete
+                  ? 'border-brand-800/60 bg-brand-900/10'
+                  : isInProgress
+                  ? 'border-amber-800/60 bg-amber-900/10'
+                  : 'hover:bg-gray-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3">
                 {isComplete ? (
-                  <CheckCircle2 size={20} className="text-brand-500 flex-shrink-0" />
+                  <CheckCircle2 size={22} className="text-brand-500 flex-shrink-0" />
+                ) : isInProgress ? (
+                  <Clock size={22} className="text-amber-500 flex-shrink-0 animate-pulse" />
                 ) : (
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-700 flex-shrink-0" />
+                  <PlayCircle size={22} className="text-gray-600 flex-shrink-0" />
                 )}
-                <div>
+
+                <div className="flex-1 min-w-0">
                   <p className="font-semibold text-gray-100">{session.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {session.sections?.reduce((acc, s) => acc + (s.rows?.length ?? 0), 0)} exercises
-                  </p>
-                </div>
-                {isExpanded ? (
-                  <ChevronDown size={16} className="text-gray-500 ml-auto" />
-                ) : (
-                  <ChevronRight size={16} className="text-gray-500 ml-auto" />
-                )}
-              </button>
-
-              {!isComplete && (
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={() => {
-                    setActiveSessionId(session.id);
-                    toggleSession(session.id);
-                  }}
-                >
-                  Start
-                </Button>
-              )}
-            </div>
-
-            {/* Session body */}
-            {isExpanded && (
-              <div className="mt-4 space-y-4">
-                {/* Date picker + complete button */}
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <Calendar size={14} className="text-gray-500" />
-                    <input
-                      type="date"
-                      className="input text-sm py-1.5 w-40"
-                      value={log?.performedOn ? log.performedOn.split('T')[0] : ''}
-                      onChange={(e) => {
-                        if (!activeSessionId) setActiveSessionId(session.id);
-                        handleSetPerformedOn(session.id, e.target.value);
-                      }}
-                    />
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className="text-xs text-gray-500">{totalExercises} exercises</span>
+                    {isComplete && log?.completedAt && (
+                      <Badge variant="green">Done {formatDate(log.completedAt)}</Badge>
+                    )}
+                    {isInProgress && (
+                      <Badge variant="yellow">In progress</Badge>
+                    )}
                   </div>
+
+                  {/* Exercise preview */}
                   {!isComplete && (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      loading={upsertSessionLog.isPending}
-                      onClick={() => handleMarkComplete(session.id)}
-                    >
-                      <CheckCircle2 size={14} />
-                      Mark Complete
-                    </Button>
-                  )}
-                  {isComplete && (
-                    <Badge variant="green">
-                      <CheckCircle2 size={10} className="mr-1" />
-                      Completed {log?.completedAt ? formatDate(log.completedAt) : ''}
-                    </Badge>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {session.sections?.flatMap((s) => s.rows ?? []).slice(0, 4).map((row) => (
+                        <span
+                          key={row.id}
+                          className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400"
+                        >
+                          {row.exercise?.name}
+                          {' '}
+                          <span className="text-gray-600">
+                            {row.sets}×{formatVolumeLabel(row.volumeType, row.volumeValue)}
+                          </span>
+                        </span>
+                      ))}
+                      {totalExercises > 4 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-600">
+                          +{totalExercises - 4} more
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
 
-                {/* Sections and exercises */}
-                {session.sections?.map((section) => (
-                  <div key={section.id}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="h-px flex-1 bg-gray-800" />
-                      <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        {section.name}
-                      </span>
-                      <div className="h-px flex-1 bg-gray-800" />
-                    </div>
-
-                    <div className="space-y-3">
-                      {section.rows?.map((row) => {
-                        const rowLog = log ? getRowLog(row.id) : null;
-                        const hasGroupSiblings = row.groupKey &&
-                          section.rows?.filter((r) => r.groupKey === row.groupKey).length! > 1;
-
-                        return (
-                          <div
-                            key={row.id}
-                            className={`p-3 rounded-lg bg-gray-800/50 ${
-                              hasGroupSiblings ? 'border-l-2 border-l-brand-600' : ''
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="font-medium text-gray-100 text-sm">
-                                    {row.exercise?.name}
-                                  </p>
-                                  {row.variant && (
-                                    <Badge variant="blue">{row.variant.name}</Badge>
-                                  )}
-                                  {hasGroupSiblings && (
-                                    <Badge variant="purple">Superset</Badge>
-                                  )}
-                                </div>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                  {row.sets} × {formatVolumeLabel(row.volumeType, row.volumeValue)}
-                                  {row.restMinutes > 0 && ` · Rest ${row.restMinutes}min`}
-                                </p>
-
-                                {/* Trainer row feedback */}
-                                {row.feedback && row.feedback.length > 0 && (
-                                  <div className="mt-1 p-1.5 bg-blue-900/20 border border-blue-800/20 rounded text-xs text-blue-300">
-                                    {row.feedback[0]?.content}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Video link */}
-                              {(row.variant?.videoUrl ?? row.exercise?.videoUrl) && (
-                                <a
-                                  href={row.variant?.videoUrl ?? row.exercise?.videoUrl ?? '#'}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="btn-ghost p-1.5 flex-shrink-0"
-                                >
-                                  <ExternalLink size={14} />
-                                </a>
-                              )}
-                            </div>
-
-                            {/* Trainee input */}
-                            {isActive && log && (
-                              <div className="mt-3 space-y-2">
-                                <div>
-                                  <p className="text-xs text-gray-400 mb-1">RPE (effort 1-10)</p>
-                                  <RPESelector
-                                    value={rowLog?.rpe}
-                                    onChange={(rpe) =>
-                                      upsertRowLog.mutate({
-                                        sessionLogId: log.id,
-                                        rowId: row.id,
-                                        rpe,
-                                        notes: rowLog?.notes,
-                                      })
-                                    }
-                                  />
-                                </div>
-                                <div>
-                                  <p className="text-xs text-gray-400 mb-1">Notes</p>
-                                  <textarea
-                                    value={rowLog?.notes ?? ''}
-                                    onChange={(e) =>
-                                      upsertRowLog.mutate({
-                                        sessionLogId: log.id,
-                                        rowId: row.id,
-                                        rpe: rowLog?.rpe,
-                                        notes: e.target.value,
-                                      })
-                                    }
-                                    rows={2}
-                                    className="input resize-none text-sm"
-                                    placeholder="How did it feel? Any pain? Notes..."
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+                <ChevronRight size={16} className="text-gray-600 flex-shrink-0" />
               </div>
-            )}
-          </div>
-        );
-      })}
+            </button>
+          );
+        })}
 
-      {displayWeek?.sessions?.length === 0 && (
-        <div className="card text-center py-10 text-gray-500">
-          No sessions planned for this week.
-        </div>
-      )}
+        {sessions.length === 0 && (
+          <div className="card text-center py-10 text-gray-500">
+            No sessions planned for this week.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

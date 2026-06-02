@@ -149,6 +149,7 @@ sessionsRouter.post('/rows', requireRole('TRAINER', 'ADMIN'), async (req, res) =
         volumeType: parsed.data.volumeType,
         volumeValue: parsed.data.volumeValue,
         sets: parsed.data.sets,
+        skipRating: parsed.data.skipRating ?? false,
       },
       include: { exercise: { include: { variants: true } }, variant: true },
     });
@@ -179,6 +180,7 @@ sessionsRouter.patch('/rows/:id', requireRole('TRAINER', 'ADMIN'), async (req, r
         ...(parsed.data.volumeType && { volumeType: parsed.data.volumeType }),
         ...(parsed.data.volumeValue !== undefined && { volumeValue: parsed.data.volumeValue }),
         ...(parsed.data.sets !== undefined && { sets: parsed.data.sets }),
+        ...(parsed.data.skipRating !== undefined && { skipRating: parsed.data.skipRating }),
       },
       include: { exercise: { include: { variants: true } }, variant: true },
     });
