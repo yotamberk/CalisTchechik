@@ -173,7 +173,84 @@ traineesRouter.get('/:traineeId/profile', async (req, res) => {
   }
 });
 
-// Get exercise progress history for a trainee
+// Paginated exercise summary list for a trainee (Progress page)
+traineesRouter.get('/:traineeId/exercises', async (req, res) => {
+  try {
+    const { traineeId } = req.params;
+    const limit = Math.min(parseInt(String(req.query['limit'] ?? '20')), 100);
+    const offset = parseInt(String(req.query['offset'] ?? '0'));
+
+    // Fetch all completed row logs for the trainee, grouped by exercise
+    const rowLogs = await prisma.rowLog.findMany({
+      where: {
+        sessionLog: { traineeId, completedAt: { not: null } },
+      },
+      include: {
+        row: { include: { exercise: true, variant: true } },
+        sessionLog: { select: { performedOn: true, createdAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Aggregate per exercise
+    const exerciseMap = new Map<string, {
+      exerciseName: string;
+      hasVariants: boolean;
+      maxDifficultyOrder: number | null;
+      maxVariantName: string | null;
+      currentVariantName: string | null;
+      currentVolumeType: string;
+      currentVolumeValue: string;
+      lastPerformedOn: string;
+      completedCount: number;
+    }>();
+
+    for (const log of rowLogs) {
+      const exId = log.row.exerciseId;
+      const performedOn = log.sessionLog.performedOn?.toISOString() ?? log.sessionLog.createdAt.toISOString();
+      const diffOrder = log.row.variant?.difficultyOrder ?? null;
+
+      if (!exerciseMap.has(exId)) {
+        exerciseMap.set(exId, {
+          exerciseName: log.row.exercise.name,
+          hasVariants: log.row.variant !== null,
+          maxDifficultyOrder: diffOrder,
+          maxVariantName: log.row.variant?.name ?? null,
+          currentVariantName: log.row.variant?.name ?? null,
+          currentVolumeType: log.row.volumeType,
+          currentVolumeValue: log.row.volumeValue,
+          lastPerformedOn: performedOn,
+          completedCount: 1,
+        });
+      } else {
+        const entry = exerciseMap.get(exId)!;
+        entry.completedCount++;
+        if (log.row.variant !== null) entry.hasVariants = true;
+        // Track best (highest difficultyOrder) variant
+        if (diffOrder !== null && (entry.maxDifficultyOrder === null || diffOrder > entry.maxDifficultyOrder)) {
+          entry.maxDifficultyOrder = diffOrder;
+          entry.maxVariantName = log.row.variant?.name ?? null;
+        }
+      }
+    }
+
+    const all = Array.from(exerciseMap.entries()).map(([exerciseId, v]) => ({
+      exerciseId,
+      ...v,
+    }));
+
+    const total = all.length;
+    const items = all.slice(offset, offset + limit);
+    const nextOffset = offset + limit < total ? offset + limit : null;
+
+    return res.json({ items, total, nextOffset });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to get exercise list' });
+  }
+});
+
+// Get exercise progress history for a trainee (extended with variantDifficultyOrder)
 traineesRouter.get('/:traineeId/progress/:exerciseId', async (req, res) => {
   try {
     const { traineeId, exerciseId } = req.params;
@@ -193,6 +270,7 @@ traineesRouter.get('/:traineeId/progress/:exerciseId', async (req, res) => {
     const progressData = logs.map((log) => ({
       date: log.sessionLog.performedOn?.toISOString() ?? log.createdAt.toISOString(),
       variantName: log.row.variant?.name ?? null,
+      variantDifficultyOrder: log.row.variant?.difficultyOrder ?? null,
       volumeValue: log.row.volumeValue,
       volumeType: log.row.volumeType,
       rpe: log.rpe,

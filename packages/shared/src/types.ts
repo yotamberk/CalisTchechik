@@ -147,3 +147,85 @@ export interface TraineePlanStatus {
   completedSessions: number;
   totalSessions: number;
 }
+
+// ---------------------------------------------------------------------------
+// Paginated wrapper
+// ---------------------------------------------------------------------------
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  nextOffset: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Progress page types
+// ---------------------------------------------------------------------------
+
+export interface ExerciseProgressSummaryDto {
+  exerciseId: string;
+  exerciseName: string;
+  hasVariants: boolean;
+  /** Best (highest difficultyOrder) variant the trainee has completed */
+  maxVariantName?: string | null;
+  maxDifficultyOrder?: number | null;
+  /** Most recently logged variant */
+  currentVariantName?: string | null;
+  currentVolumeType: VolumeType;
+  currentVolumeValue: string;
+  lastPerformedOn: string;
+  completedCount: number;
+}
+
+export interface ExerciseProgressPointDto {
+  date: string;
+  variantName: string | null;
+  variantDifficultyOrder: number | null;
+  volumeValue: string;
+  volumeType: string;
+  rpe: number | null;
+  notes?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// History page types
+// ---------------------------------------------------------------------------
+
+export interface SessionTimelineItemDto {
+  logId: string;
+  sessionId: string;
+  sessionName: string;
+  planName: string;
+  weekNumber: number;
+  performedOn: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  exerciseCount: number;
+  completed: boolean;
+}
+
+export interface SessionLogDetailRowDto {
+  rowId: string;
+  exerciseName: string;
+  variantName?: string | null;
+  volumeType: string;
+  volumeValue: string;
+  sets: number;
+  skipRating: boolean;
+  rpe?: number | null;
+  notes?: string | null;
+}
+
+export interface SessionLogDetailDto {
+  logId: string;
+  sessionId: string;
+  sessionName: string;
+  planName: string;
+  weekNumber: number;
+  startedAt: string | null;
+  performedOn: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  rows: SessionLogDetailRowDto[];
+}

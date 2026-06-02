@@ -17,6 +17,7 @@
     "@react-oauth/google": "^0.12.1",
     "@tanstack/react-query": "^5.32.1",
     "@tanstack/react-query-devtools": "^5.32.1",
+    "@tanstack/react-virtual": "^3.14.2",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
