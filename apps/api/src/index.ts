@@ -64,8 +64,13 @@ app.use(
   },
 );
 
-app.listen(PORT, () => {
-  console.log(`API server running on http://localhost:${PORT}`);
-});
+// Only start a long-running listener outside of serverless (e.g. local dev /
+// `npm start`). On Vercel the app is imported and invoked per-request, so we
+// must not bind a port.
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`API server running on http://localhost:${PORT}`);
+  });
+}
 
 export default app;

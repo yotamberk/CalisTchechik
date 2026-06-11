@@ -108,15 +108,22 @@ VITE_API_URL=/api
 ```
 
 4. Add your Vercel domain to Google OAuth authorized origins
-5. Deploy! Vercel auto-runs `npm run build`
+5. Deploy! Vercel auto-runs `npm install` (which runs `prisma generate` via `postinstall`) and then `npm run build`.
+
+> The serverless API lives at `api/index.ts` and wraps the Express app. The app only binds a port when run locally (it detects Vercel via the `VERCEL` env var), so the same code works for both `npm run dev` and serverless.
 
 ### 3. Run migrations on Neon
 
-After first deploy, run:
+Migrations are **not** run automatically. After the first deploy (and whenever the schema changes), apply them against the production database from your machine:
+
 ```bash
-DATABASE_URL="your-neon-url" npm run db:migrate
-DATABASE_URL="your-neon-url" npm run db:seed
+# Use the DIRECT (non-pooled) Neon connection string for migrations
+DATABASE_URL="your-neon-direct-url" npm run db:deploy
+DATABASE_URL="your-neon-direct-url" npm run db:seed
 ```
+
+> Use `db:deploy` (`prisma migrate deploy`) for production — it applies committed migrations without prompting. `db:migrate` is for local development only.
+> For runtime, set `DATABASE_URL` in Vercel to the **pooled** Neon connection string; for migrations above, prefer the **direct** connection string.
 
 ## Project Structure
 

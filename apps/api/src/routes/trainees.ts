@@ -123,8 +123,7 @@ traineesRouter.get('/:traineeId/profile', async (req, res) => {
     // Get the most recent row log per exercise for this trainee
     const recentLogs = await prisma.rowLog.findMany({
       where: {
-        sessionLog: { traineeId },
-        sessionLog: { completedAt: { not: null } },
+        sessionLog: { traineeId, completedAt: { not: null } },
       },
       include: {
         row: {

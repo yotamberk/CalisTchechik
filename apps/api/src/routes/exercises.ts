@@ -139,7 +139,7 @@ exercisesRouter.post('/:exerciseId/variants', requireRole('TRAINER', 'ADMIN'), a
 
     const variant = await prisma.exerciseVariant.create({
       data: {
-        exerciseId: req.params['exerciseId'],
+        exerciseId: req.params['exerciseId']!,
         name: parsed.data.name,
         videoUrl: parsed.data.videoUrl || null,
         difficultyOrder: count,
