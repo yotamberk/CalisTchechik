@@ -1,0 +1,5 @@
+{
+  "name": "calist-serverless-api",
+  "private": true,
+  "type": "module"
+}
