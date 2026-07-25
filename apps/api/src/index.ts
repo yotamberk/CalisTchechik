@@ -16,10 +16,12 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:5173',
+  process.env.FRONTEND_URL,
+  // Vercel injects VERCEL_URL automatically (e.g. "calis-tchechik-web.vercel.app")
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
   'http://localhost:5173',
   'http://localhost:4173',
-];
+].filter(Boolean) as string[];
 
 app.use(
   cors({
