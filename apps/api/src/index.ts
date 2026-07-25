@@ -17,7 +17,11 @@ const PORT = process.env.PORT || 4000;
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  // Vercel injects VERCEL_URL automatically (e.g. "calis-tchechik-web.vercel.app")
+  // VERCEL_PROJECT_PRODUCTION_URL = stable production alias (e.g. "calis-tchechik-web.vercel.app")
+  process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : undefined,
+  // VERCEL_URL = per-deployment URL (changes each deploy, covers preview URLs)
   process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
   'http://localhost:5173',
   'http://localhost:4173',
