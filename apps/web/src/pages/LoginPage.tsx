@@ -1,9 +1,18 @@
-import { GoogleLogin } from '@react-oauth/google';
+import { GoogleLogin, useGoogleOneTapLogin } from '@react-oauth/google';
 import { Dumbbell } from 'lucide-react';
 import { useGoogleCredentialLogin } from '@/components/auth/GoogleLoginButton';
 
 export function LoginPage() {
   const { handleCredential, loading, error } = useGoogleCredentialLogin();
+
+  // One Tap renders as an in-page overlay — no popup needed, works on all mobile browsers
+  useGoogleOneTapLogin({
+    onSuccess: (credentialResponse) => {
+      if (credentialResponse.credential) handleCredential(credentialResponse.credential);
+    },
+    onError: () => {},
+    disabled: loading,
+  });
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
