@@ -8,7 +8,7 @@
     "packages/shared"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\"",
+    "dev": "npm run build --workspace=packages/shared && concurrently \"npm run dev --workspace=packages/shared\" \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\"",
     "build": "prisma generate --schema=prisma/schema.prisma && npm run build --workspace=packages/shared && npm run build --workspace=apps/api && npm run build --workspace=apps/web",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
